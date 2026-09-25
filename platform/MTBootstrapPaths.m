@@ -14,7 +14,7 @@ NSString *const MTRuntimeStateLogicalPath =
     @"/var/lib/marktheme/state";
 NSString *const MTGenerationInboxLogicalPath =
     @"/var/mobile/Library/Application Support/MarkTheme/PublishInbox";
-NSString *const MTManagerDataRootLiteralPath =
+NSString *const MTManagerDataRootLogicalPath =
     @"/var/mobile/Library/Application Support/MarkTheme";
 NSString *const MTRuntimeHelperLogicalPath =
     @"/usr/libexec/marktheme-helper";
@@ -46,8 +46,10 @@ NSURL *MTDefaultManagerDataRootURL(void) {
     return applicationSupport == nil ? nil : [applicationSupport
         URLByAppendingPathComponent:@"MarkTheme" isDirectory:YES];
 #else
-    return [NSURL fileURLWithPath:MTManagerDataRootLiteralPath
-                     isDirectory:YES];
+    NSError *error = nil;
+    NSString *path = [MTBootstrapPathResolver.currentResolver
+        resolvedPathForLogicalPath:MTManagerDataRootLogicalPath error:&error];
+    return path == nil ? nil : [NSURL fileURLWithPath:path isDirectory:YES];
 #endif
 }
 

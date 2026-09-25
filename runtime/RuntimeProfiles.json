@@ -23,12 +23,14 @@
           "bundleID": "com.apple.springboard",
           "executable": "SpringBoard",
           "adapters": [
-            "springboard.icon-image-cache",
-            "springboard.notification-icon",
-            "springboard.clock-image-set",
-            "springboard.folder-image",
-            "springboard.badge-background",
-            "springboard.icon-shadow",
+            "springboard.notification-icon-source",
+            "springboard.icon-morph-carrier",
+            "calendar-ui-kit.dynamic-icon-source",
+            "springboard.calendar-appearance",
+            "springboard-home.clock-icon-sources",
+            "springboard-home.folder-icon-source",
+            "springboard-home.badge-source",
+            "springboard-home.icon-shadow-carrier",
             "springboard.statusbar-signal-image"
           ],
           "modules": [
@@ -49,13 +51,9 @@
           "bundleID": "com.apple.Preferences",
           "executable": "Preferences",
           "adapters": [
-            "preferences.icon-image-cache",
-            "preferences.application-icon-image"
+            "preferences.ui-resource-image"
           ],
           "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
             "ui-resources.snapshot"
           ]
         },
@@ -65,27 +63,9 @@
           "bundleID": "com.apple.SharingUIService",
           "executable": "SharingUIService",
           "adapters": [
-            "share-sheet.activity-image"
+            "share-sheet.activity-glyph"
           ],
           "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
-            "ui-resources.snapshot"
-          ]
-        },
-        {
-          "profileID": "share-sheet.loaded-host.ui-icons",
-          "mode": "processAdapters",
-          "bundleID": "com.apple.ShareSheet",
-          "executable": "ShareSheet",
-          "adapters": [
-            "share-sheet.activity-image"
-          ],
-          "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
             "ui-resources.snapshot"
           ]
         },
@@ -95,12 +75,9 @@
           "bundleID": "com.apple.sharingd",
           "executable": "sharingd",
           "adapters": [
-            "share-sheet.activity-image"
+            "share-sheet.activity-glyph"
           ],
           "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
             "ui-resources.snapshot"
           ]
         },
@@ -110,12 +87,9 @@
           "bundleID": "com.apple.mobileslideshow",
           "executable": "MobileSlideShow",
           "adapters": [
-            "share-sheet.activity-image"
+            "share-sheet.activity-glyph"
           ],
           "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
             "ui-resources.snapshot"
           ]
         },
@@ -125,9 +99,9 @@
           "bundleID": "com.apple.Spotlight",
           "executable": "Spotlight",
           "adapters": [
-            "spotlight.icon-image-cache",
-            "springboard.clock-image-set",
-            "spotlight.search-ui-app-image"
+            "springboard-home.clock-icon-sources",
+            "calendar-ui-kit.dynamic-icon-source",
+            "spotlight.calendar-appearance"
           ],
           "modules": [
             "static-icons.snapshot",

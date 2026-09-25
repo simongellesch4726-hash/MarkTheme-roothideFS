@@ -4,7 +4,6 @@
 @class MTThemeComponentSelection;
 @class MTThemeComponentSelectionStore;
 @class MTThemeCapabilityReport;
-@class MTThemeLibraryRevisionSummary;
 @class MTThemeLibraryStore;
 @class MTThemeLibraryThemeSummary;
 @class MTThemeMixSelection;
@@ -23,21 +22,14 @@ typedef NS_ENUM(NSUInteger, MTManagerOperation) {
     MTManagerOperationApplying = 2,
     MTManagerOperationDisabling = 3,
     MTManagerOperationRollingBack = 4,
-    MTManagerOperationSwitchingRevision = 5,
-    MTManagerOperationRemovingRevision = 6,
-    MTManagerOperationReloadingDesktop = 7,
-    MTManagerOperationRemovingTheme = 8,
+    MTManagerOperationRespringing = 5,
+    MTManagerOperationRemovingTheme = 6,
 };
 
 typedef void (^MTManagerOperationCompletion)(BOOL success,
                                               NSError * _Nullable error);
 typedef void (^MTManagerApplyCompletion)(BOOL success,
-                                         BOOL reloadRequired,
                                          NSError * _Nullable error);
-typedef void (^MTManagerRevisionHistoryCompletion)(
-    NSArray<MTThemeLibraryRevisionSummary *> * _Nullable revisions,
-    NSError * _Nullable error);
-
 // Immutable product-facing projection of Library and Runtime. UIKit screens
 // consume this object and never infer canonical state independently.
 @interface MTManagerSnapshot : NSObject
@@ -101,7 +93,6 @@ typedef void (^MTManagerRevisionHistoryCompletion)(
     (nullable NSString *)themeIdentifier;
 - (BOOL)runtimeMatchesCurrentSelectionForThemeIdentifier:
     (nullable NSString *)themeIdentifier;
-- (BOOL)runtimeUsesThemeIdentifier:(nullable NSString *)themeIdentifier;
 
 - (instancetype)init NS_UNAVAILABLE;
 + (instancetype)new NS_UNAVAILABLE;
@@ -173,24 +164,20 @@ typedef void (^MTManagerRevisionHistoryCompletion)(
             baseThemeIdentifier:(NSString *)baseThemeIdentifier
                       completion:
                           (nullable MTManagerOperationCompletion)completion;
+- (void)setAppIconFallbackThemeIdentifier:
+    (nullable NSString *)fallbackThemeIdentifier
+                                    atIndex:(NSUInteger)index
+                     baseThemeIdentifier:(NSString *)baseThemeIdentifier
+                               completion:
+                                   (nullable MTManagerOperationCompletion)completion;
 - (void)applySelectionWithCompletion:
     (nullable MTManagerApplyCompletion)completion;
-- (void)reloadDesktopWithCompletion:
+- (void)requestRespringWithCompletion:
     (nullable MTManagerOperationCompletion)completion;
 - (void)rollbackRuntimeWithCompletion:
     (nullable MTManagerOperationCompletion)completion;
 
-- (void)loadRevisionHistoryForThemeIdentifier:(NSString *)themeIdentifier
-    completion:(MTManagerRevisionHistoryCompletion)completion;
-- (void)switchThemeIdentifier:(NSString *)themeIdentifier
-           toRevisionIdentifier:(NSString *)revisionIdentifier
-                     completion:
-                         (nullable MTManagerOperationCompletion)completion;
-- (void)removeRevisionIdentifier:(NSString *)revisionIdentifier
-              fromThemeIdentifier:(NSString *)themeIdentifier
-                        completion:
-                            (nullable MTManagerOperationCompletion)completion;
-// Removes a theme and every revision it stores. The caller is responsible for
+// Removes a theme and its current snapshot. The caller is responsible for
 // confirming the deletion; a theme that is currently applied must be disabled
 // or replaced first, which the Library refuses to do implicitly.
 - (void)removeThemeIdentifier:(NSString *)themeIdentifier

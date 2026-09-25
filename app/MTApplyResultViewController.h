@@ -4,16 +4,17 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// Shared Apply outcome for Home and Theme Detail. Every successful theme
-// switch offers the same user-triggered Respring in a fixed bottom action
-// dock; Runtime delivery changes only the explanatory copy.
+// Shared Apply outcome for Home and Theme Detail. Every successful active
+// theme, stock restore, or mix-Generation change ends at the same explicit
+// Respring boundary. The trusted IconServices transaction has already passed
+// before this controller is presented; display-process delivery is diagnostic
+// only and never changes the product action.
 @interface MTApplyResultViewController : UIViewController
 
 @property(nonatomic, copy, nullable) dispatch_block_t dismissalHandler;
 
 - (instancetype)initWithThemeName:(NSString *)themeName
                     restoredStock:(BOOL)restoredStock
-                   reloadRequired:(BOOL)reloadRequired
                  managerController:(MTManagerController *)managerController
     NS_DESIGNATED_INITIALIZER;
 - (instancetype)initWithNibName:(nullable NSString *)nibNameOrNil

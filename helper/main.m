@@ -6,6 +6,7 @@
 #import <stdio.h>
 #import <string.h>
 #import <sys/stat.h>
+#import <sys/wait.h>
 #import <unistd.h>
 
 #import "MTBootstrapPaths.h"
@@ -14,7 +15,21 @@
 #import "MTRuntimeState.h"
 #import "MTRuntimeStoreController.h"
 
+#if !defined(MARKTHEME_ICON_SERVICE_BARRIER_REQUIRED)
+#define MARKTHEME_ICON_SERVICE_BARRIER_REQUIRED 0
+#endif
+
+_Static_assert(MARKTHEME_ICON_SERVICE_BARRIER_REQUIRED == 0 ||
+               MARKTHEME_ICON_SERVICE_BARRIER_REQUIRED == 1,
+    "MARKTHEME_ICON_SERVICE_BARRIER_REQUIRED must be disabled or enabled");
+
 extern char **environ;
+
+static const char *const MTIconServiceLaunchdLabel =
+    "user/501/com.apple.iconservices.iconservicesagent";
+static const NSUInteger MTIconServiceReadyPollCount = 40;
+static const useconds_t MTIconServiceReadyPollMicroseconds = 50000;
+static const NSUInteger MTIconServiceDeliveryAttemptCount = 2;
 
 static int MTPrintHelperJSON(NSDictionary<NSString *, id> *document) {
     NSError *error = nil;
@@ -181,6 +196,154 @@ static BOOL MTRequestDesktopReload(NSError **error) {
     return spawnResult == 0;
 }
 
+static BOOL MTKickstartIconService(void) {
+    NSString *resolvedExecutable = [MTBootstrapPathResolver.currentResolver
+        resolvedPathForLogicalPath:MTServiceControlExecutableLogicalPath
+                               error:NULL];
+    const char *executable = resolvedExecutable.fileSystemRepresentation;
+    if (executable == NULL) return NO;
+    posix_spawn_file_actions_t actions;
+    int actionResult = posix_spawn_file_actions_init(&actions);
+    if (actionResult != 0) return NO;
+    if (actionResult == 0) {
+        actionResult = posix_spawn_file_actions_addopen(
+            &actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    }
+    if (actionResult == 0) {
+        actionResult = posix_spawn_file_actions_addopen(
+            &actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    }
+    if (actionResult == 0) {
+        actionResult = posix_spawn_file_actions_addopen(
+            &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    }
+    if (actionResult != 0) {
+        posix_spawn_file_actions_destroy(&actions);
+        return NO;
+    }
+    char *arguments[] = {
+        (char *)executable,
+        (char *)"kickstart",
+        (char *)"-k",
+        (char *)MTIconServiceLaunchdLabel,
+        NULL,
+    };
+    pid_t child = 0;
+    int spawnResult = posix_spawn(
+        &child, executable, &actions, NULL,
+        arguments, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (spawnResult != 0) return NO;
+    int childStatus = 0;
+    pid_t waited = -1;
+    do {
+        waited = waitpid(child, &childStatus, 0);
+    } while (waited < 0 && errno == EINTR);
+    return waited == child && WIFEXITED(childStatus) &&
+        WEXITSTATUS(childStatus) == 0;
+}
+
+static BOOL MTWaitForIconServiceRuntime(
+    MTIconServiceRuntimeStatus *statusOut) {
+    MTIconServiceRuntimeStatus status = {0};
+    for (NSUInteger attempt = 0;
+         attempt < MTIconServiceReadyPollCount; attempt++) {
+        BOOL present = MTIconServiceReadRuntimeStatus(&status);
+        if (present &&
+            MTIconServiceRuntimeStatusCanReceiveTransactions(status)) {
+            if (statusOut != NULL) *statusOut = status;
+            return YES;
+        }
+        if (present &&
+            MTIconServiceRuntimeStatusIsCurrentAndLive(status) &&
+            (status.stage == MTIconServiceRuntimeStageDisabled ||
+             status.stage >=
+                 MTIconServiceRuntimeStageSnapshotLoaderFailed)) {
+            if (statusOut != NULL) *statusOut = status;
+            return NO;
+        }
+        usleep(MTIconServiceReadyPollMicroseconds);
+    }
+    if (statusOut != NULL) *statusOut = status;
+    return NO;
+}
+
+static BOOL MTPrepareIconServiceRuntime(
+    MTIconServiceRuntimeStatus *statusOut) {
+    MTIconServiceRuntimeStatus status = {0};
+    BOOL present = MTIconServiceReadRuntimeStatus(&status);
+    if (present &&
+        MTIconServiceRuntimeStatusCanReceiveTransactions(status)) {
+        if (statusOut != NULL) *statusOut = status;
+        return YES;
+    }
+    if (present &&
+        MTIconServiceRuntimeStatusIsCurrentAndLive(status)) {
+        if (MTWaitForIconServiceRuntime(&status)) {
+            if (statusOut != NULL) *statusOut = status;
+            return YES;
+        }
+        BOOL terminal =
+            status.stage == MTIconServiceRuntimeStageDisabled ||
+            status.stage >= MTIconServiceRuntimeStageSnapshotLoaderFailed;
+        if (terminal) {
+            if (statusOut != NULL) *statusOut = status;
+            return NO;
+        }
+    }
+    if (!MTKickstartIconService()) {
+        if (statusOut != NULL) *statusOut = status;
+        return NO;
+    }
+    return MTWaitForIconServiceRuntime(statusOut);
+}
+
+static BOOL MTDeliverIconServiceState(
+    uint64_t sequence,
+    MTIconServiceRuntimeStatus *statusOut,
+    NSUInteger *attemptCountOut) {
+    MTIconServiceRuntimeStatus status = {0};
+    NSUInteger attempts = 0;
+    BOOL acknowledged = NO;
+    for (NSUInteger attempt = 0;
+         attempt < MTIconServiceDeliveryAttemptCount; attempt++) {
+        attempts += 1;
+        if (!MTPrepareIconServiceRuntime(&status)) continue;
+        if (MTIconServicePostInvalidationAndWaitForAcknowledgement(
+                sequence)) {
+            acknowledged = YES;
+            break;
+        }
+        MTIconServiceRuntimeStatus latest = {0};
+        if (MTIconServiceReadRuntimeStatus(&latest)) status = latest;
+    }
+    MTIconServiceRuntimeStatus latest = {0};
+    if (MTIconServiceReadRuntimeStatus(&latest)) status = latest;
+    if (statusOut != NULL) *statusOut = status;
+    if (attemptCountOut != NULL) *attemptCountOut = attempts;
+    return acknowledged;
+}
+
+static NSDictionary<NSString *, id> *MTIconServiceStatusDictionary(
+    MTIconServiceRuntimeStatus status,
+    BOOL available) {
+    if (!available) {
+        return @{
+            @"available" : @NO,
+            @"stage" : @"unknown",
+        };
+    }
+    return @{
+        @"available" : @YES,
+        @"currentAndLive" :
+            @(MTIconServiceRuntimeStatusIsCurrentAndLive(status)),
+        @"detail" : @(status.detail),
+        @"processIdentifier" : @(status.processIdentifier),
+        @"runtimeBuild" : @(status.runtimeBuild),
+        @"stage" : MTIconServiceRuntimeStageName(status.stage),
+    };
+}
+
 static int MTPrintInvalidArguments(int argc, const char *argv[]) {
     const char *operation = argc > 1 && argv[1] != NULL ? argv[1] : NULL;
     BOOL knownOperation = operation != NULL &&
@@ -261,7 +424,12 @@ int main(int argc, const char *argv[]) {
         if (statusCommand) {
             MTRuntimeState *state = [controller currentStateWithError:&error];
             if (state == nil) return MTPrintHelperFailure(@"status", error);
+            MTIconServiceRuntimeStatus iconServiceStatus = {0};
+            BOOL iconServiceStatusAvailable =
+                MTIconServiceReadRuntimeStatus(&iconServiceStatus);
             return MTPrintHelperJSON(@{
+                @"iconServiceRuntime" : MTIconServiceStatusDictionary(
+                    iconServiceStatus, iconServiceStatusAvailable),
                 @"operation" : @"status",
                 @"schemaVersion" : @1,
                 @"state" : MTStateDictionary(state),
@@ -318,11 +486,19 @@ int main(int argc, const char *argv[]) {
             status = @"disabled";
         }
         if (state == nil) return MTPrintHelperFailure(operation, error);
-        BOOL runtimeAcknowledged = applyCommand
-            ? MTRuntimePostInvalidationAndWaitForAcknowledgement(
-                state.sequence)
-            : MTRuntimePostInvalidation();
-
+        MTIconServiceRuntimeStatus iconServiceStatus = {0};
+        BOOL iconServiceStatusAvailable = NO;
+        BOOL iconServiceAcknowledged =
+            MARKTHEME_ICON_SERVICE_BARRIER_REQUIRED == 0;
+        NSUInteger iconServiceAttempts = 0;
+        if (MARKTHEME_ICON_SERVICE_BARRIER_REQUIRED == 1) {
+            iconServiceAcknowledged = MTDeliverIconServiceState(
+                state.sequence, &iconServiceStatus,
+                &iconServiceAttempts);
+            iconServiceStatusAvailable =
+                iconServiceStatus.stage !=
+                    MTIconServiceRuntimeStageUnknown;
+        }
         NSMutableDictionary<NSString *, id> *response = [@{
             @"operation" : operation,
             @"schemaVersion" : @1,
@@ -334,10 +510,12 @@ int main(int argc, const char *argv[]) {
             response[@"reusedExistingGeneration"] =
                 @(publishResult.reusedExistingGeneration);
         }
-        if (applyCommand) {
-            response[@"runtimeDelivery"] = runtimeAcknowledged
-                ? @"acknowledged" : @"reloadRequired";
-        }
+        response[@"iconServiceDelivery"] = iconServiceAcknowledged
+            ? @"acknowledged" : @"unavailable";
+        response[@"iconServiceAttempts"] = @(iconServiceAttempts);
+        response[@"iconServiceRuntime"] =
+            MTIconServiceStatusDictionary(
+                iconServiceStatus, iconServiceStatusAvailable);
         return MTPrintHelperJSON(response);
     }
 }

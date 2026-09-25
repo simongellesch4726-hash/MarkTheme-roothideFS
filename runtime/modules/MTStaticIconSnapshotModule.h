@@ -11,7 +11,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString *const MTStaticIconSnapshotModuleID;
 FOUNDATION_EXPORT NSString *const MTStaticIconSnapshotModuleErrorDomain;
-FOUNDATION_EXPORT const NSUInteger MTStaticIconSnapshotPrewarmBatchLimit;
 
 typedef NS_ENUM(uint32_t, MTStaticIconSnapshotModuleState) {
     MTStaticIconSnapshotModuleStateDormant = 0,
@@ -27,28 +26,15 @@ typedef struct MTStaticIconSnapshotObservation {
     _Atomic(uint64_t) snapshotMisses;
     _Atomic(uint64_t) resourceHits;
     _Atomic(uint64_t) cacheHits;
-    _Atomic(uint64_t) decodeScheduled;
-    _Atomic(uint64_t) pendingMisses;
-    _Atomic(uint64_t) failureMisses;
-    _Atomic(uint64_t) saturatedMisses;
+    _Atomic(uint64_t) decodeAttempts;
     _Atomic(uint64_t) decodeSuccesses;
     _Atomic(uint64_t) decodeFailures;
-    _Atomic(uint64_t) staleCompletions;
     _Atomic(uint64_t) memoryPressurePurges;
     _Atomic(uint64_t) cacheEvictions;
-    _Atomic(uint64_t) prewarmBatches;
-    _Atomic(uint64_t) prewarmIdentifiers;
-    _Atomic(uint64_t) prewarmResourceHits;
 } MTStaticIconSnapshotObservation;
 
 FOUNDATION_EXPORT MTStaticIconSnapshotObservation
     MTRuntimeStaticIconSnapshotObservation;
-
-typedef void (^MTStaticIconSnapshotImageReadyHandler)(
-    NSString *bundleIdentifier,
-    NSString *generationIdentifier);
-typedef void (^MTStaticIconSnapshotPrewarmCompletion)(
-    NSSet<NSString *> *resolvedIdentifiers);
 
 // Configures one process-local module against the already-created Kernel.
 // Preparation runs on the Adapter's guarded main-queue install path.
@@ -57,61 +43,23 @@ FOUNDATION_EXPORT BOOL MTStaticIconSnapshotConfigure(
     BOOL calendarCompositeEnabled,
     NSError **error);
 FOUNDATION_EXPORT BOOL MTStaticIconSnapshotPrepare(void);
-FOUNDATION_EXPORT void MTStaticIconSnapshotReload(void);
-FOUNDATION_EXPORT void MTStaticIconSnapshotSetImageReadyHandler(
-    MTStaticIconSnapshotImageReadyHandler _Nullable handler);
 
-// A ready lookup is keyed directly by immutable Generation + bundle + image
-// contract, so animation calls do not rebuild canonical resource keys or touch
-// the Generation index. A valid foreground miss is still decoded once before
-// returning, preserving the first observable themed result. Background
-// prewarming shares that same bounded cache.
-FOUNDATION_EXPORT id _Nullable MTStaticIconSnapshotResolve(
-    NSString *bundleIdentifier,
-    id _Nullable originalResult);
-
-// Resolves one exact square application-icon contract supplied by a proven
-// system producer such as SearchUI. Unlike the UIImage-shaped convenience
-// entry above, this does not infer scale from a potentially rewrapped stock
-// carrier.
-FOUNDATION_EXPORT id _Nullable MTStaticIconSnapshotResolveSystemSurface(
-    NSString *bundleIdentifier,
+// SpringBoardHome supplies the exact Clock face geometry. Resolve only the raw
+// themed face here; its native source adapter preserves includingMask: and
+// composes mask/overlay appearance after this boundary.
+FOUNDATION_EXPORT id _Nullable MTStaticIconSnapshotResolveClockSource(
     CGSize pointSize,
     CGFloat scale);
 
-// Returns only an already-decoded primary SpringBoard icon. It performs no
-// resource resolution, decode, pending wait, or Calendar composition and is
-// therefore safe to query before the exact original animation image producer.
-FOUNDATION_EXPORT id _Nullable MTStaticIconSnapshotResolveReady(
-    NSString *bundleIdentifier,
+// CalendarUIKit supplies the exact date components and calendar used by its
+// native dynamic generator. Resolve the themed raw source against that same
+// semantic input instead of recomputing "today" in a display-layer adapter.
+FOUNDATION_EXPORT CGImageRef _Nullable
+MTStaticIconSnapshotResolveCalendarSource(
+    NSDateComponents *dateComponents,
+    NSCalendar *calendar,
+    NSInteger format,
     CGSize pointSize,
-    CGFloat scale);
-
-// Resolves the same icons.static resource for non-SpringBoard system surfaces.
-// The stock image-like object supplies CGImage dimensions and scale; the
-// returned UIImage preserves the producer's point-size contract without
-// adding another resource copy.
-FOUNDATION_EXPORT id _Nullable MTStaticIconSnapshotResolveSecondarySurfaceImage(
-    NSString *bundleIdentifier,
-    id _Nullable originalResult,
-    CGSize * _Nullable pointSizeOut,
-    CGFloat * _Nullable scaleOut);
-
-// Prepares one bounded identifier batch on the existing decode queue. The
-// completion runs only after every earlier decode for that batch has settled
-// and returns only identifiers resolved by the active Generation.
-FOUNDATION_EXPORT void MTStaticIconSnapshotPrewarmBundleIdentifiers(
-    NSArray<NSString *> *bundleIdentifiers,
-    NSString *expectedGenerationIdentifier,
-    MTStaticIconSnapshotPrewarmCompletion completion);
-
-// Narrows tracked Runtime identifiers to subjects that have at least one
-// static-icon record in the accepted Generation, including configured alias
-// and fuzzy fallbacks. An internal validation failure conservatively returns
-// every input identifier so optimization can never suppress a valid refresh.
-FOUNDATION_EXPORT NSSet<NSString *> *
-    MTStaticIconSnapshotPrewarmCandidateIdentifiers(
-        NSArray<NSString *> *bundleIdentifiers,
-        NSString *expectedGenerationIdentifier);
+    CGFloat scale) CF_RETURNS_RETAINED;
 
 NS_ASSUME_NONNULL_END

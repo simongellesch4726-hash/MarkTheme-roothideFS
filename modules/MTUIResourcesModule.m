@@ -18,10 +18,10 @@ MTModuleDescriptor *MTUIResourcesModuleDescriptor(void) {
                ]
                 dependencies:@[]
              processAdapters:@[
-                    @"preferences.icon-image-cache",
-                    @"share-sheet.activity-image",
+                    @"preferences.ui-resource-image",
+                    @"share-sheet.activity-glyph",
                ]
-          refreshRequirement:MTRefreshRequirementTargeted
+          refreshRequirement:MTRefreshRequirementRespring
                        error:NULL];
     });
     return descriptor;

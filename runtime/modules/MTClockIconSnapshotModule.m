@@ -4,6 +4,8 @@
 #import <dispatch/dispatch.h>
 #import <os/lock.h>
 
+#include <math.h>
+
 #import "MTClockIconsModule.h"
 #import "MTGenerationDescriptor.h"
 #import "MTGenerationReader.h"
@@ -15,6 +17,21 @@
 #import "MTStaticIconVisualProofContract.h"
 
 NSString *const MTClockIconSnapshotModuleID = @"clock-icons.snapshot";
+
+MTClockIconSnapshotObservation MTRuntimeClockIconSnapshotObservation = {
+    .schemaVersion = 2,
+    .state = ATOMIC_VAR_INIT(MTClockIconSnapshotModuleStateDormant),
+    .resourceRequests = ATOMIC_VAR_INIT(0),
+    .resourceHits = ATOMIC_VAR_INIT(0),
+    .decodeSuccesses = ATOMIC_VAR_INIT(0),
+    .decodeFailures = ATOMIC_VAR_INIT(0),
+    .imageSetPublishes = ATOMIC_VAR_INIT(0),
+    .componentMatchRequests = ATOMIC_VAR_INIT(0),
+    .componentMatchResults = ATOMIC_VAR_INIT(0),
+};
+
+_Static_assert(sizeof(MTClockIconSnapshotObservation) == 64,
+    "Clock native-source Module observation ABI changed");
 
 @interface MTClockIconImageSet ()
 - (instancetype)initWithGenerationIdentifier:(NSString *)generationIdentifier
@@ -50,9 +67,7 @@ NSString *const MTClockIconSnapshotModuleID = @"clock-icons.snapshot";
 @property(nonatomic, weak) MTRuntimeKernel *kernel;
 @property(nonatomic, strong) MTRuntimePublishedImageLoader *imageLoader;
 @property(atomic, strong, nullable) MTClockIconImageSet *currentImageSet;
-@property(atomic, assign) uint64_t requestedEpoch;
-@property(atomic, copy, nullable) dispatch_block_t readyHandler;
-- (void)reload;
+- (void)loadInitialImageSet;
 @end
 
 @implementation MTClockIconSnapshotModule
@@ -82,9 +97,15 @@ NSString *const MTClockIconSnapshotModuleID = @"clock-icons.snapshot";
 
 - (UIImage *)loadFullCanvasForVariant:(NSString *)variant
                             generation:(MTGeneration *)generation {
+    atomic_fetch_add_explicit(
+        &MTRuntimeClockIconSnapshotObservation.resourceRequests,
+        1, memory_order_relaxed);
     MTGenerationResource *resource = [self resourceForVariant:variant
                                                    generation:generation];
     if (resource == nil) return nil;
+    atomic_fetch_add_explicit(
+        &MTRuntimeClockIconSnapshotObservation.resourceHits,
+        1, memory_order_relaxed);
     MTRuntimeDecodedImage *decoded = [self.imageLoader
         loadImageForGeneration:generation
                       resource:resource
@@ -95,8 +116,17 @@ NSString *const MTClockIconSnapshotModuleID = @"clock-icons.snapshot";
         initWithCGImage:decoded.image
         scale:MTStaticIconVisualProofExpectedScale
         orientation:UIImageOrientationUp];
-    return MTStaticIconVisualProofImageContractIsSupported(
-        image.size, image.scale) ? image : nil;
+    if (!MTStaticIconVisualProofImageContractIsSupported(
+            image.size, image.scale)) {
+        atomic_fetch_add_explicit(
+            &MTRuntimeClockIconSnapshotObservation.decodeFailures,
+            1, memory_order_relaxed);
+        return nil;
+    }
+    atomic_fetch_add_explicit(
+        &MTRuntimeClockIconSnapshotObservation.decodeSuccesses,
+        1, memory_order_relaxed);
+    return image;
 }
 
 static UIImage *MTClockCropHandCanvas(UIImage *canvas,
@@ -129,18 +159,15 @@ static UIImage *MTClockTransparentImage(size_t pixelWidth,
     return image;
 }
 
-- (void)reload {
+- (void)loadInitialImageSet {
     MTRuntimeSnapshot *snapshot = self.kernel.currentSnapshot;
-    uint64_t epoch = 0;
-    @synchronized (self) {
-        epoch = self.requestedEpoch + 1;
-        self.requestedEpoch = epoch;
-    }
     if (!snapshot.isReady || ![snapshot.generation.descriptor.moduleIDs
             containsObject:MTClockIconsModuleID]) {
         self.currentImageSet = nil;
-        dispatch_block_t handler = self.readyHandler;
-        if (handler != nil) dispatch_async(dispatch_get_main_queue(), handler);
+        atomic_store_explicit(
+            &MTRuntimeClockIconSnapshotObservation.state,
+            MTClockIconSnapshotModuleStateConfigured,
+            memory_order_release);
         return;
     }
     MTGeneration *generation = snapshot.generation;
@@ -167,14 +194,17 @@ static UIImage *MTClockTransparentImage(size_t pixelWidth,
             initWithGenerationIdentifier:generationIdentifier
             hourHand:hour minuteHand:minute secondHand:second
             hourMinuteDot:hourMinuteDot secondDot:secondDot];
-    if (self.requestedEpoch != epoch ||
-        ![self.kernel.currentSnapshot.state.activeGenerationIdentifier
-            isEqualToString:generationIdentifier]) {
-        return;
-    }
     self.currentImageSet = set;
-    dispatch_block_t handler = self.readyHandler;
-    if (handler != nil) dispatch_async(dispatch_get_main_queue(), handler);
+    if (set != nil) {
+        atomic_fetch_add_explicit(
+            &MTRuntimeClockIconSnapshotObservation.imageSetPublishes,
+            1, memory_order_relaxed);
+    }
+    atomic_store_explicit(
+        &MTRuntimeClockIconSnapshotObservation.state,
+        set != nil ? MTClockIconSnapshotModuleStateReady
+                   : MTClockIconSnapshotModuleStateConfigured,
+        memory_order_release);
 }
 
 @end
@@ -191,6 +221,14 @@ BOOL MTClockIconSnapshotConfigure(MTRuntimeKernel *kernel, NSError **error) {
     }
     BOOL configured = MTClockIconSnapshotInstance != nil;
     os_unfair_lock_unlock(&MTClockIconSnapshotLock);
+    if (configured) {
+        uint32_t expected = MTClockIconSnapshotModuleStateDormant;
+        atomic_compare_exchange_strong_explicit(
+            &MTRuntimeClockIconSnapshotObservation.state,
+            &expected, MTClockIconSnapshotModuleStateConfigured,
+            memory_order_acq_rel, memory_order_acquire);
+        [MTClockIconSnapshotInstance loadInitialImageSet];
+    }
     if (!configured && error != NULL) {
         *error = [NSError errorWithDomain:@"com.hmmzzz.marktheme.clock-snapshot"
                                      code:1
@@ -201,14 +239,93 @@ BOOL MTClockIconSnapshotConfigure(MTRuntimeKernel *kernel, NSError **error) {
     return configured;
 }
 
-void MTClockIconSnapshotReload(void) {
-    [MTClockIconSnapshotInstance reload];
-}
-
-void MTClockIconSnapshotSetReadyHandler(dispatch_block_t handler) {
-    MTClockIconSnapshotInstance.readyHandler = handler;
-}
-
 MTClockIconImageSet *MTClockIconSnapshotCurrentImageSet(void) {
     return MTClockIconSnapshotInstance.currentImageSet;
+}
+
+static BOOL MTClockNativeComponentContract(UIImage *image) {
+    if (![image isKindOfClass:UIImage.class] || image.CGImage == NULL ||
+        !isfinite(image.scale) || image.scale < 1 || image.scale > 3 ||
+        floor(image.scale) != image.scale) {
+        return NO;
+    }
+    size_t width = CGImageGetWidth(image.CGImage);
+    size_t height = CGImageGetHeight(image.CGImage);
+    return width >= 1 && height >= 1 && width <= 512 && height <= 512 &&
+        fabs(image.size.width * image.scale - (CGFloat)width) < 0.01 &&
+        fabs(image.size.height * image.scale - (CGFloat)height) < 0.01;
+}
+
+static UIImage *MTClockImageMatchingNativeComponent(UIImage *source,
+                                                     id nativeComponent) {
+    if (![source isKindOfClass:UIImage.class] || source.CGImage == NULL ||
+        ![nativeComponent isKindOfClass:UIImage.class]) {
+        return nil;
+    }
+    UIImage *nativeImage = nativeComponent;
+    if (!MTClockNativeComponentContract(nativeImage)) return nil;
+    size_t pixelWidth = CGImageGetWidth(nativeImage.CGImage);
+    size_t pixelHeight = CGImageGetHeight(nativeImage.CGImage);
+    if (CGImageGetWidth(source.CGImage) == pixelWidth &&
+        CGImageGetHeight(source.CGImage) == pixelHeight &&
+        source.scale == nativeImage.scale) {
+        return source;
+    }
+    CGSize pointSize = CGSizeMake(
+        (CGFloat)pixelWidth / nativeImage.scale,
+        (CGFloat)pixelHeight / nativeImage.scale);
+    UIGraphicsImageRendererFormat *format =
+        [UIGraphicsImageRendererFormat preferredFormat];
+    format.scale = nativeImage.scale;
+    format.opaque = NO;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc]
+        initWithSize:pointSize format:format];
+    UIImage *result = [renderer imageWithActions:
+        ^(UIGraphicsImageRendererContext *context) {
+            (void)context;
+            [source drawInRect:(CGRect){CGPointZero, pointSize}];
+        }];
+    return MTClockNativeComponentContract(result) &&
+        CGImageGetWidth(result.CGImage) == pixelWidth &&
+        CGImageGetHeight(result.CGImage) == pixelHeight
+        ? result : nil;
+}
+
+MTClockIconImageSet *MTClockIconSnapshotImageSetMatchingNativeComponents(
+    id hourHand,
+    id minuteHand,
+    id secondHand,
+    id hourMinuteDot,
+    id secondDot) {
+    atomic_fetch_add_explicit(
+        &MTRuntimeClockIconSnapshotObservation.componentMatchRequests,
+        1, memory_order_relaxed);
+    MTClockIconImageSet *source =
+        MTClockIconSnapshotInstance.currentImageSet;
+    if (source == nil) return nil;
+    UIImage *hour = source.hourHand == nil ? nil :
+        MTClockImageMatchingNativeComponent(source.hourHand, hourHand);
+    UIImage *minute = source.minuteHand == nil ? nil :
+        MTClockImageMatchingNativeComponent(source.minuteHand, minuteHand);
+    UIImage *second = source.secondHand == nil ? nil :
+        MTClockImageMatchingNativeComponent(source.secondHand, secondHand);
+    if (hour == nil && minute == nil && second == nil) return nil;
+    UIImage *hourDot = source.hourMinuteDot == nil ? nil :
+        MTClockImageMatchingNativeComponent(
+            source.hourMinuteDot, hourMinuteDot);
+    UIImage *secondsDot = source.secondDot == nil ? nil :
+        MTClockImageMatchingNativeComponent(source.secondDot, secondDot);
+    MTClockIconImageSet *result = [[MTClockIconImageSet alloc]
+        initWithGenerationIdentifier:source.generationIdentifier
+        hourHand:hour
+        minuteHand:minute
+        secondHand:second
+        hourMinuteDot:hourDot
+        secondDot:secondsDot];
+    if (result != nil) {
+        atomic_fetch_add_explicit(
+            &MTRuntimeClockIconSnapshotObservation.componentMatchResults,
+            1, memory_order_relaxed);
+    }
+    return result;
 }

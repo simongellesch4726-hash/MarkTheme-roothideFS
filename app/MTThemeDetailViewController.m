@@ -184,6 +184,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
                 sourceName:(nullable NSString *)sourceName
                   mixable:(BOOL)mixable
       availableSourceCount:(NSUInteger)availableSourceCount
+ selectedPrimarySourceAvailable:(BOOL)selectedPrimarySourceAvailable
    selectedSourceAvailable:(BOOL)selectedSourceAvailable
                   editable:(BOOL)editable
                 sourceMenu:(nullable UIMenu *)sourceMenu
@@ -316,6 +317,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
                 sourceName:(NSString *)sourceName
                   mixable:(BOOL)mixable
       availableSourceCount:(NSUInteger)availableSourceCount
+ selectedPrimarySourceAvailable:(BOOL)selectedPrimarySourceAvailable
    selectedSourceAvailable:(BOOL)selectedSourceAvailable
                   editable:(BOOL)editable
                 sourceMenu:(UIMenu *)sourceMenu
@@ -324,7 +326,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     self.toggleHandler = toggleHandler;
     BOOL hasSources = availableSourceCount > 0;
     BOOL canChooseSource = hasSources &&
-        (!selectedSourceAvailable || availableSourceCount > 1);
+        (!selectedPrimarySourceAvailable || availableSourceCount > 1);
     UIColor *color = !mixable ? MTDetailFeatureColor(item)
         : (enabled ? MTSuccessColor()
             : (!selectedSourceAvailable && hasSources
@@ -450,6 +452,11 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
 - (void)configureVariantGroup:(MTThemeVariantGroup *)group
                        option:(MTThemeVariantOption *)option
                      editable:(BOOL)editable;
+- (void)configureAppIconFallbackWithTitle:(NSString *)title
+                                    detail:(NSString *)detail
+                                     value:(NSString *)value
+                                  selected:(BOOL)selected
+                                  editable:(BOOL)editable;
 @end
 
 @implementation MTThemeConfigurationCell
@@ -587,6 +594,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     self.selectionStyle = UITableViewCellSelectionStyleNone;
     self.contentView.alpha = editable ? 1.0 : 0.62;
     self.isAccessibilityElement = NO;
+    self.accessibilityHint = nil;
     self.accessibilityLabel = component.displayName;
     self.accessibilityValue = enabled
         ? MTDetailLocalized(@"theme.detail.configuration.enabled")
@@ -603,6 +611,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
         MTDetailLocalized(@"theme.detail.configuration.style-resource-count"),
         (unsigned long)option.resourceCount];
     self.valueLabel.text = option.displayName;
+    self.valueLabel.textColor = MTAccentColor();
     self.iconView.image = [UIImage systemImageNamed:
         MTDetailVariantGroupSymbol(group)];
     self.iconView.tintColor = MTAccentColor();
@@ -616,124 +625,40 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     self.contentView.alpha = editable ? 1.0 : 0.62;
     self.isAccessibilityElement = YES;
     self.accessibilityTraits = UIAccessibilityTraitButton;
+    self.accessibilityHint = nil;
     self.accessibilityLabel = self.titleLabel.text;
     self.accessibilityValue = option.displayName;
 }
 
-@end
-
-@interface MTThemeRevisionCell : UITableViewCell
-@property(nonatomic, strong) UIView *card;
-@property(nonatomic, strong) UIView *iconBackground;
-@property(nonatomic, strong) UIImageView *iconView;
-@property(nonatomic, strong) UILabel *titleLabel;
-@property(nonatomic, strong) UILabel *detailLabel;
-@property(nonatomic, strong) UIImageView *checkView;
-- (void)configureWithTitle:(NSString *)title
-                    detail:(nullable NSString *)detail
-                    symbol:(NSString *)symbol
-                     color:(UIColor *)color
-                showsCheck:(BOOL)showsCheck;
-@end
-
-@implementation MTThemeRevisionCell
-
-- (instancetype)initWithStyle:(UITableViewCellStyle)style
-               reuseIdentifier:(NSString *)reuseIdentifier {
-    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
-    if (self == nil) return nil;
-    self.backgroundColor = UIColor.clearColor;
-    self.selectionStyle = UITableViewCellSelectionStyleNone;
-
-    _card = MTCardView();
-    _card.translatesAutoresizingMaskIntoConstraints = NO;
-    _card.layer.cornerRadius = 18.0;
-    [self.contentView addSubview:_card];
-
-    _iconBackground = [[UIView alloc] initWithFrame:CGRectZero];
-    _iconBackground.translatesAutoresizingMaskIntoConstraints = NO;
-    _iconBackground.layer.cornerRadius = 13.0;
-    _iconBackground.layer.cornerCurve = kCACornerCurveContinuous;
-    [_card addSubview:_iconBackground];
-
-    _iconView = [[UIImageView alloc] initWithFrame:CGRectZero];
-    _iconView.translatesAutoresizingMaskIntoConstraints = NO;
-    _iconView.contentMode = UIViewContentModeScaleAspectFit;
-    [_iconBackground addSubview:_iconView];
-
-    _titleLabel = MTLabel(UIFontTextStyleBody, UIFontWeightSemibold,
-                          UIColor.labelColor);
-    _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _titleLabel.numberOfLines = 2;
-    [_card addSubview:_titleLabel];
-
-    _detailLabel = MTLabel(UIFontTextStyleFootnote, UIFontWeightRegular,
-                           UIColor.secondaryLabelColor);
-    _detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _detailLabel.numberOfLines = 1;
-    [_card addSubview:_detailLabel];
-
-    _checkView = [[UIImageView alloc]
-        initWithImage:[UIImage systemImageNamed:@"checkmark.circle.fill"]];
-    _checkView.translatesAutoresizingMaskIntoConstraints = NO;
-    _checkView.tintColor = MTSuccessColor();
-    _checkView.contentMode = UIViewContentModeScaleAspectFit;
-    [_card addSubview:_checkView];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [_card.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor
-                                            constant:20],
-        [_card.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor
-                                             constant:-20],
-        [_card.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:4],
-        [_card.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-4],
-
-        [_iconBackground.leadingAnchor constraintEqualToAnchor:_card.leadingAnchor
-                                                      constant:14],
-        [_iconBackground.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
-        [_iconBackground.widthAnchor constraintEqualToConstant:40],
-        [_iconBackground.heightAnchor constraintEqualToConstant:40],
-        [_iconView.centerXAnchor constraintEqualToAnchor:_iconBackground.centerXAnchor],
-        [_iconView.centerYAnchor constraintEqualToAnchor:_iconBackground.centerYAnchor],
-        [_iconView.widthAnchor constraintEqualToConstant:19],
-        [_iconView.heightAnchor constraintEqualToConstant:19],
-
-        [_titleLabel.leadingAnchor constraintEqualToAnchor:_iconBackground.trailingAnchor
-                                                 constant:12],
-        [_titleLabel.topAnchor constraintEqualToAnchor:_card.topAnchor constant:13],
-        [_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:
-            _checkView.leadingAnchor constant:-10],
-
-        [_detailLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
-        [_detailLabel.trailingAnchor constraintLessThanOrEqualToAnchor:
-            _checkView.leadingAnchor constant:-10],
-        [_detailLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor
-                                              constant:3],
-        [_detailLabel.bottomAnchor constraintEqualToAnchor:_card.bottomAnchor
-                                                 constant:-13],
-
-        [_checkView.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor
-                                                 constant:-16],
-        [_checkView.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
-        [_checkView.widthAnchor constraintEqualToConstant:21],
-        [_checkView.heightAnchor constraintEqualToConstant:21],
-    ]];
-    return self;
-}
-
-- (void)configureWithTitle:(NSString *)title
-                    detail:(NSString *)detail
-                    symbol:(NSString *)symbol
-                     color:(UIColor *)color
-                showsCheck:(BOOL)showsCheck {
+- (void)configureAppIconFallbackWithTitle:(NSString *)title
+                                    detail:(NSString *)detail
+                                     value:(NSString *)value
+                                  selected:(BOOL)selected
+                                  editable:(BOOL)editable {
+    self.componentIdentifier = nil;
+    self.toggleHandler = nil;
     self.titleLabel.text = title;
     self.detailLabel.text = detail;
-    self.iconView.image = [UIImage systemImageNamed:symbol];
-    self.iconView.tintColor = color;
-    self.iconBackground.backgroundColor = MTTintedBackground(color);
-    self.checkView.hidden = !showsCheck;
+    self.valueLabel.text = value;
+    self.valueLabel.textColor = selected
+        ? MTAccentColor() : UIColor.secondaryLabelColor;
+    self.iconView.image = [UIImage systemImageNamed:
+        selected ? @"square.stack.3d.up.fill" : @"plus.square.on.square"];
+    self.iconView.tintColor = MTAccentColor();
+    self.iconBackground.backgroundColor = MTTintedBackground(MTAccentColor());
+    self.valueLabel.hidden = NO;
+    self.chevronView.hidden = NO;
+    self.toggle.hidden = YES;
+    self.selectionStyle = editable
+        ? UITableViewCellSelectionStyleDefault
+        : UITableViewCellSelectionStyleNone;
+    self.contentView.alpha = editable ? 1.0 : 0.62;
+    self.isAccessibilityElement = YES;
+    self.accessibilityTraits = editable
+        ? UIAccessibilityTraitButton : UIAccessibilityTraitNotEnabled;
     self.accessibilityLabel = title;
-    self.accessibilityValue = detail;
+    self.accessibilityValue = value;
+    self.accessibilityHint = detail;
 }
 
 @end
@@ -762,11 +687,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
 @property(nonatomic, copy)
     NSDictionary<NSString *, NSSet<NSString *> *> *
         availableFeaturesByThemeIdentifier;
-@property(nonatomic, copy)
-    NSArray<MTThemeLibraryRevisionSummary *> *revisions;
 @property(nonatomic, copy, nullable) NSString *projectedRevisionIdentifier;
-@property(nonatomic, copy)
-    NSArray<MTThemeLibraryRevisionSummary *> *projectedRevisionHistory;
 @property(nonatomic, copy, nullable) NSString *projectedActiveThemeIdentifier;
 @property(nonatomic, copy, nullable) NSString *projectedActiveRevisionIdentifier;
 @property(nonatomic, copy, nullable) NSString *projectedActiveGenerationIdentifier;
@@ -818,7 +739,6 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     _availableFeaturesByThemeIdentifier = @{};
     _selectableComponents = @[];
     _selectableVariantGroups = @[];
-    _revisions = @[];
     _projectedLibraryRevisionIdentifiers = @{};
     _projectedLibraryComponentSelections = @{};
     _headerLayoutCache = [[MTTableSupplementaryLayoutCache alloc] init];
@@ -841,8 +761,6 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
            forCellReuseIdentifier:@"ThemeCapabilityCell"];
     [self.tableView registerClass:MTThemeConfigurationCell.class
            forCellReuseIdentifier:@"ThemeConfigurationCell"];
-    [self.tableView registerClass:MTThemeRevisionCell.class
-           forCellReuseIdentifier:@"ThemeRevisionCell"];
     [self buildThemeHeader];
     if (@available(iOS 17.0, *)) {
         __weak typeof(self) weakSelf = self;
@@ -998,10 +916,6 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     NSString *revisionIdentifier = theme.currentRevision.revisionIdentifier;
     BOOL revisionChanged = !MTDetailStringsEqual(
         self.projectedRevisionIdentifier, revisionIdentifier);
-    NSArray<MTThemeLibraryRevisionSummary *> *revisionHistory =
-        theme.revisionHistory ?: @[];
-    BOOL revisionHistoryChanged = ![self.projectedRevisionHistory
-        isEqualToArray:revisionHistory];
     MTThemeManifest *manifest = theme.currentRevision.manifest;
     MTManagerSnapshot *snapshot = self.managerController.snapshot;
     NSDictionary<NSString *, NSString *> *libraryRevisionIdentifiers =
@@ -1021,9 +935,6 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
             snapshot.capabilityReportsByThemeIdentifier;
         self.availableFeaturesByThemeIdentifier =
             snapshot.availableFeatureIdentifiersByThemeIdentifier;
-    }
-    if (revisionHistoryChanged) {
-        self.revisions = revisionHistory;
     }
     if (revisionChanged) {
         self.capabilityReport =
@@ -1171,12 +1082,6 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
         apply.baseBackgroundColor = UIColor.tertiarySystemFillColor;
         apply.baseForegroundColor = UIColor.secondaryLabelColor;
         self.applyButton.enabled = NO;
-    } else if (theme.requiresReimport) {
-        apply.title = MTDetailLocalized(@"theme.detail.reimport-required");
-        apply.image = [UIImage systemImageNamed:@"arrow.down.doc"];
-        apply.baseBackgroundColor = UIColor.tertiarySystemFillColor;
-        apply.baseForegroundColor = UIColor.secondaryLabelColor;
-        self.applyButton.enabled = NO;
     } else if (exactActive) {
         apply.title = MTDetailLocalized(@"theme.detail.in-use");
         apply.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];
@@ -1194,7 +1099,6 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     }
     self.applyButton.configuration = apply;
     self.projectedRevisionIdentifier = revisionIdentifier;
-    self.projectedRevisionHistory = revisionHistory;
     self.projectedActiveThemeIdentifier = snapshot.activeThemeIdentifier;
     self.projectedActiveRevisionIdentifier = snapshot.activeRevisionIdentifier;
     self.projectedActiveGenerationIdentifier =
@@ -1246,8 +1150,6 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
         self.themeSummary.currentRevision.revisionIdentifier;
     BOOL revisionChanged = !MTDetailStringsEqual(
         self.projectedRevisionIdentifier, revisionIdentifier);
-    BOOL revisionHistoryChanged = ![self.projectedRevisionHistory
-        isEqualToArray:(self.themeSummary.revisionHistory ?: @[])];
     BOOL runtimeSelectionChanged =
         !MTDetailStringsEqual(self.projectedActiveThemeIdentifier,
                               snapshot.activeThemeIdentifier) ||
@@ -1276,7 +1178,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     BOOL runtimeAvailabilityChanged =
         self.projectedRuntimeControlAvailable !=
             snapshot.runtimeControlAvailable;
-    BOOL projectionChanged = revisionChanged || revisionHistoryChanged ||
+    BOOL projectionChanged = revisionChanged ||
         runtimeSelectionChanged || componentSelectionChanged ||
         mixSelectionChanged || librarySourcesChanged ||
         libraryComponentSelectionsChanged || operationChanged ||
@@ -1286,7 +1188,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     if (revisionChanged) {
         [self.tableView reloadData];
         [self loadPreview];
-    } else if (revisionHistoryChanged || librarySourcesChanged) {
+    } else if (librarySourcesChanged) {
         [self.tableView reloadData];
     } else {
         NSMutableIndexSet *sections = [NSMutableIndexSet indexSet];
@@ -1294,12 +1196,10 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
             (componentSelectionChanged || operationChanged)) {
             [sections addIndex:(NSUInteger)self.configurationSectionIndex];
         }
-        if (self.versionHistorySectionIndex >= 0 &&
-            (runtimeSelectionChanged || operationChanged)) {
-            [sections addIndex:(NSUInteger)self.versionHistorySectionIndex];
-        }
         if (mixSelectionChanged || libraryComponentSelectionsChanged ||
             operationChanged) {
+            [sections addIndex:(NSUInteger)
+                self.appIconFallbackSectionIndex];
             [sections addIndex:(NSUInteger)self.contentsSectionIndex];
         }
         if (sections.count > 0) {
@@ -1314,27 +1214,21 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
         self.selectableVariantGroups.count > 0;
 }
 
-- (BOOL)showsVersionHistorySection {
-    return self.revisions.count > 1;
-}
-
 - (NSInteger)configurationSectionIndex {
     return self.showsConfigurationSection ? 0 : -1;
 }
 
-- (NSInteger)contentsSectionIndex {
+- (NSInteger)appIconFallbackSectionIndex {
     return self.showsConfigurationSection ? 1 : 0;
 }
 
-- (NSInteger)versionHistorySectionIndex {
-    return self.showsVersionHistorySection
-        ? self.contentsSectionIndex + 1 : -1;
+- (NSInteger)contentsSectionIndex {
+    return self.appIconFallbackSectionIndex + 1;
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     (void)tableView;
-    return 1 + (self.showsConfigurationSection ? 1 : 0) +
-        (self.showsVersionHistorySection ? 1 : 0);
+    return 2 + (self.showsConfigurationSection ? 1 : 0);
 }
 
 - (NSInteger)tableView:(UITableView *)tableView
@@ -1344,11 +1238,13 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
         return (NSInteger)(self.selectableComponents.count +
             self.selectableVariantGroups.count);
     }
+    if (section == self.appIconFallbackSectionIndex) {
+        return (NSInteger)MTThemeAppIconFallbackMaximumCount;
+    }
     if (section == self.contentsSectionIndex) {
         return (NSInteger)self.displayedCapabilityItems.count;
     }
-    return section == self.versionHistorySectionIndex
-        ? (NSInteger)self.revisions.count : 0;
+    return 0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView
@@ -1357,10 +1253,17 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     if (section == self.configurationSectionIndex) {
         return MTDetailLocalized(@"theme.detail.section.configuration");
     }
-    if (section == self.contentsSectionIndex) {
-        return MTDetailLocalized(@"theme.detail.section.contents");
+    if (section == self.appIconFallbackSectionIndex) {
+        return MTDetailLocalized(@"theme.detail.section.icon-fallback");
     }
-    return MTDetailLocalized(@"theme.detail.section.versions");
+    return MTDetailLocalized(@"theme.detail.section.contents");
+}
+
+- (NSString *)tableView:(UITableView *)tableView
+ titleForFooterInSection:(NSInteger)section {
+    (void)tableView;
+    return section == self.appIconFallbackSectionIndex
+        ? MTDetailLocalized(@"theme.detail.icon-fallback.footer") : nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView
@@ -1420,6 +1323,59 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
         return cell;
     }
 
+    if (indexPath.section == self.appIconFallbackSectionIndex) {
+        MTThemeConfigurationCell *cell = [tableView
+            dequeueReusableCellWithIdentifier:@"ThemeConfigurationCell"
+                                  forIndexPath:indexPath];
+        NSUInteger slot = (NSUInteger)indexPath.row;
+        NSArray<NSString *> *fallbacks =
+            self.mixSelection.appIconFallbackThemeIdentifiers ?: @[];
+        NSString *themeIdentifier = slot < fallbacks.count
+            ? fallbacks[slot] : nil;
+        MTThemeLibraryThemeSummary *fallbackTheme = [
+            self.managerController.snapshot themeWithIdentifier:themeIdentifier];
+        NSString *value = fallbackTheme.currentRevision.manifest.displayName ?:
+            fallbackTheme.themeID;
+        BOOL slotAvailable = slot <= fallbacks.count;
+        NSString *primaryThemeIdentifier = [self.mixSelection
+            sourceThemeIdentifierForFeatureIdentifier:MTThemeFeatureAppIcons];
+        BOOL hasCandidate = themeIdentifier.length > 0;
+        for (MTThemeLibraryThemeSummary *source in
+                self.featureSourcesByIdentifier[MTThemeFeatureAppIcons]) {
+            if ([source.themeID isEqualToString:primaryThemeIdentifier]) continue;
+            NSUInteger existingIndex = [fallbacks indexOfObject:source.themeID];
+            if (existingIndex == NSNotFound || existingIndex == slot) {
+                hasCandidate = YES;
+                break;
+            }
+        }
+        if (value.length == 0) {
+            value = slotAvailable
+                ? MTDetailLocalized(@"theme.detail.icon-fallback.add")
+                : MTDetailLocalized(@"theme.detail.icon-fallback.add-second-first");
+        }
+        BOOL idle = self.managerController.snapshot.operation ==
+                MTManagerOperationIdle &&
+            !self.managerController.snapshot.isLibraryRefreshing &&
+            !self.managerController.snapshot.isRuntimeRefreshing;
+        NSString *titleKey = slot == 0
+            ? @"theme.detail.icon-fallback.second"
+            : @"theme.detail.icon-fallback.third";
+        NSString *detailKey = slot == 0
+            ? @"theme.detail.icon-fallback.second-detail"
+            : @"theme.detail.icon-fallback.third-detail";
+        [cell configureAppIconFallbackWithTitle:MTDetailLocalized(titleKey)
+            detail:MTDetailLocalized(detailKey)
+            value:value
+            selected:themeIdentifier.length > 0
+            editable:idle && self.mixSelection != nil && slotAvailable &&
+                hasCandidate];
+        cell.accessibilityIdentifier = [NSString stringWithFormat:
+            @"marktheme.theme-detail.icon-fallback.%lu",
+            (unsigned long)(slot + 2)];
+        return cell;
+    }
+
     if (indexPath.section == self.contentsSectionIndex) {
         MTThemeCapabilityCell *cell = [tableView
             dequeueReusableCellWithIdentifier:@"ThemeCapabilityCell"
@@ -1440,16 +1396,33 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
                 break;
             }
         }
-        BOOL selectedSourceAvailable = selectedSourceTheme != nil;
+        BOOL selectedPrimarySourceAvailable = selectedSourceTheme != nil;
+        BOOL selectedSourceAvailable = selectedPrimarySourceAvailable;
+        if ([item.featureID isEqualToString:MTThemeFeatureAppIcons] &&
+            !selectedSourceAvailable) {
+            for (NSString *fallbackThemeIdentifier in
+                    self.mixSelection.appIconFallbackThemeIdentifiers) {
+                if ([self.availableFeaturesByThemeIdentifier[
+                        fallbackThemeIdentifier]
+                        containsObject:MTThemeFeatureAppIcons]) {
+                    selectedSourceAvailable = YES;
+                    break;
+                }
+            }
+        }
         BOOL desiredEnabled = mixable &&
             [self.mixSelection isFeatureEnabled:item.featureID];
         BOOL enabled = mixable
             ? (desiredEnabled && selectedSourceAvailable)
             : item.isRuntimeApplicable;
-        NSString *sourceName = selectedSourceTheme.currentRevision.manifest
-            .displayName ?: selectedSourceTheme.themeID;
-        if (selectedSourceAvailable &&
-            [selectedSourceTheme.themeID isEqualToString:self.themeIdentifier]) {
+        MTThemeLibraryThemeSummary *sourcePresentationTheme =
+            selectedSourceTheme ?: [self.managerController.snapshot
+                themeWithIdentifier:sourceIdentifier];
+        NSString *sourceName = sourcePresentationTheme.currentRevision.manifest
+            .displayName ?: sourcePresentationTheme.themeID;
+        if (sourcePresentationTheme != nil &&
+            [sourcePresentationTheme.themeID
+                isEqualToString:self.themeIdentifier]) {
             sourceName = [NSString stringWithFormat:
                 MTDetailLocalized(@"theme.detail.feature.base-source-format"),
                 sourceName ?: self.themeIdentifier];
@@ -1468,6 +1441,7 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
             sourceName:sourceName
             mixable:mixable
             availableSourceCount:sources.count
+            selectedPrimarySourceAvailable:selectedPrimarySourceAvailable
             selectedSourceAvailable:selectedSourceAvailable
             editable:editable
             sourceMenu:sourceMenu
@@ -1494,57 +1468,8 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
         return cell;
     }
 
-    MTThemeRevisionCell *cell = [tableView
-        dequeueReusableCellWithIdentifier:@"ThemeRevisionCell"
-                              forIndexPath:indexPath];
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    cell.accessibilityIdentifier = [NSString stringWithFormat:
-        @"marktheme.theme-detail.revision.%ld", (long)indexPath.row];
-    MTThemeLibraryRevisionSummary *revision =
-        self.revisions[(NSUInteger)indexPath.row];
-    BOOL active = MTDetailStringsEqual(
-        self.managerController.snapshot.activeThemeIdentifier,
-        self.themeIdentifier) &&
-        MTDetailStringsEqual(revision.revisionIdentifier,
-            self.managerController.snapshot.activeRevisionIdentifier);
-    NSString *title = nil;
-    NSString *symbol = nil;
-    UIColor *color = nil;
-    if (revision.isCurrent && active) {
-        title = MTDetailLocalized(@"theme.detail.current-active");
-        symbol = @"checkmark.seal.fill";
-        color = MTSuccessColor();
-    } else if (revision.isCurrent) {
-        title = MTDetailLocalized(@"theme.detail.current-library");
-        symbol = @"checkmark.circle.fill";
-        color = MTAccentColor();
-    } else if (active) {
-        title = MTDetailLocalized(@"theme.detail.active-old");
-        symbol = @"clock.fill";
-        color = MTWarningColor();
-    } else {
-        title = [NSString stringWithFormat:
-            MTDetailLocalized(@"theme.detail.version-format"),
-            (unsigned long)(indexPath.row + 1)];
-        symbol = @"doc.fill";
-        color = MTAccentColor();
-    }
-    NSString *bytes = [NSByteCountFormatter
-        stringFromByteCount:(long long)revision.assetByteCount
-                  countStyle:NSByteCountFormatterCountStyleFile];
-    NSString *detail = [NSString stringWithFormat:
-        MTDetailLocalized(@"theme.detail.revision-detail-format"),
-        (unsigned long)revision.assetCount, bytes];
-    [cell configureWithTitle:title
-                       detail:detail
-                      symbol:symbol
-                       color:color
-                  showsCheck:revision.isCurrent];
-    cell.selectionStyle = revision.isCurrent || revision.requiresReimport ||
-        self.managerController.snapshot.operation != MTManagerOperationIdle
-        ? UITableViewCellSelectionStyleNone
-        : UITableViewCellSelectionStyleDefault;
-    return cell;
+    return [[UITableViewCell alloc]
+        initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
 }
 
 - (void)tableView:(UITableView *)tableView
@@ -1564,16 +1489,21 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
         }
         return;
     }
-    if (indexPath.section == self.contentsSectionIndex) {
+    if (indexPath.section == self.appIconFallbackSectionIndex) {
+        NSUInteger slot = (NSUInteger)indexPath.row;
+        BOOL idle = self.managerController.snapshot.operation ==
+                MTManagerOperationIdle &&
+            !self.managerController.snapshot.isLibraryRefreshing &&
+            !self.managerController.snapshot.isRuntimeRefreshing;
+        if (!idle || self.mixSelection == nil ||
+            slot > self.mixSelection.appIconFallbackThemeIdentifiers.count) {
+            return;
+        }
+        [self presentAppIconFallbackPickerAtIndex:slot
+            sourceView:[tableView cellForRowAtIndexPath:indexPath]];
         return;
     }
-    if (indexPath.section != self.versionHistorySectionIndex) return;
-    if ((NSUInteger)indexPath.row >= self.revisions.count) return;
-    MTThemeLibraryRevisionSummary *revision =
-        self.revisions[(NSUInteger)indexPath.row];
-    if (revision.isCurrent || revision.requiresReimport ||
-        self.managerController.snapshot.operation != MTManagerOperationIdle) return;
-    [self confirmSwitchToRevision:revision];
+    return;
 }
 
 - (UIMenu *)sourceMenuForItem:(MTThemeCapabilityItem *)item
@@ -1625,6 +1555,84 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
                         children:actions];
 }
 
+- (void)presentAppIconFallbackPickerAtIndex:(NSUInteger)index
+                                 sourceView:(UIView *)sourceView {
+    NSArray<NSString *> *fallbacks =
+        self.mixSelection.appIconFallbackThemeIdentifiers ?: @[];
+    if (index >= MTThemeAppIconFallbackMaximumCount || index > fallbacks.count) {
+        return;
+    }
+    NSString *currentThemeIdentifier = index < fallbacks.count
+        ? fallbacks[index] : nil;
+    NSString *primaryThemeIdentifier = [self.mixSelection
+        sourceThemeIdentifierForFeatureIdentifier:MTThemeFeatureAppIcons];
+    NSString *titleKey = index == 0
+        ? @"theme.detail.icon-fallback.choose-second"
+        : @"theme.detail.icon-fallback.choose-third";
+    UIAlertController *picker = [UIAlertController
+        alertControllerWithTitle:MTDetailLocalized(titleKey)
+        message:MTDetailLocalized(@"theme.detail.icon-fallback.picker-detail")
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    NSArray<MTThemeLibraryThemeSummary *> *sources =
+        self.featureSourcesByIdentifier[MTThemeFeatureAppIcons] ?: @[];
+    for (MTThemeLibraryThemeSummary *source in sources) {
+        if ([source.themeID isEqualToString:primaryThemeIdentifier]) continue;
+        NSUInteger existingIndex = [fallbacks indexOfObject:source.themeID];
+        if (existingIndex != NSNotFound && existingIndex != index) continue;
+        NSString *name = source.currentRevision.manifest.displayName ?:
+            source.themeID;
+        BOOL selected = [source.themeID
+            isEqualToString:currentThemeIdentifier];
+        NSString *actionTitle = selected
+            ? [NSString stringWithFormat:@"✓ %@", name] : name;
+        [picker addAction:[UIAlertAction
+            actionWithTitle:actionTitle
+            style:UIAlertActionStyleDefault
+            handler:^(__unused UIAlertAction *action) {
+            [weakSelf.managerController
+                setAppIconFallbackThemeIdentifier:source.themeID
+                atIndex:index
+                baseThemeIdentifier:weakSelf.themeIdentifier
+                completion:^(BOOL success, NSError *error) {
+                if (!success) {
+                    [weakSelf presentOperationError:error];
+                } else {
+                    [[[UISelectionFeedbackGenerator alloc] init]
+                        selectionChanged];
+                }
+            }];
+        }]];
+    }
+    if (currentThemeIdentifier.length > 0) {
+        [picker addAction:[UIAlertAction
+            actionWithTitle:MTDetailLocalized(
+                @"theme.detail.icon-fallback.remove")
+            style:UIAlertActionStyleDestructive
+            handler:^(__unused UIAlertAction *action) {
+            [weakSelf.managerController
+                setAppIconFallbackThemeIdentifier:nil
+                atIndex:index
+                baseThemeIdentifier:weakSelf.themeIdentifier
+                completion:^(BOOL success, NSError *error) {
+                if (!success) {
+                    [weakSelf presentOperationError:error];
+                } else {
+                    [[[UISelectionFeedbackGenerator alloc] init]
+                        selectionChanged];
+                }
+            }];
+        }]];
+    }
+    [picker addAction:[UIAlertAction
+        actionWithTitle:MTDetailLocalized(@"common.cancel")
+        style:UIAlertActionStyleCancel handler:nil]];
+    picker.popoverPresentationController.sourceView = sourceView ?: self.view;
+    picker.popoverPresentationController.sourceRect = sourceView == nil
+        ? self.view.bounds : sourceView.bounds;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
 - (void)presentVariantPickerForGroup:(MTThemeVariantGroup *)group
                           sourceView:(UIView *)sourceView {
     NSString *selected = [self.componentSelection
@@ -1666,67 +1674,12 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
     [self presentViewController:picker animated:YES completion:nil];
 }
 
-- (void)confirmSwitchToRevision:(MTThemeLibraryRevisionSummary *)revision {
-    UIAlertController *alert = [UIAlertController
-        alertControllerWithTitle:
-            MTDetailLocalized(@"theme.detail.switch-confirm-title")
-        message:MTDetailLocalized(@"theme.detail.switch-confirm-detail")
-        preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction
-        actionWithTitle:MTDetailLocalized(@"common.cancel")
-                  style:UIAlertActionStyleCancel handler:nil]];
-    __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction
-        actionWithTitle:MTDetailLocalized(@"theme.detail.switch-action")
-                  style:UIAlertActionStyleDefault
-                handler:^(__unused UIAlertAction *action) {
-        [weakSelf.managerController
-            switchThemeIdentifier:weakSelf.themeIdentifier
-            toRevisionIdentifier:revision.revisionIdentifier
-            completion:^(BOOL success, NSError *error) {
-            if (!success) {
-                [weakSelf presentOperationError:error];
-            }
-        }];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
- trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
-    (void)tableView;
-    if (indexPath.section != self.versionHistorySectionIndex ||
-        (NSUInteger)indexPath.row >= self.revisions.count) return nil;
-    MTThemeLibraryRevisionSummary *revision =
-        self.revisions[(NSUInteger)indexPath.row];
-    if (revision.isCurrent || revision.requiresReimport ||
-        self.managerController.snapshot.operation != MTManagerOperationIdle) return nil;
-    __weak typeof(self) weakSelf = self;
-    UIContextualAction *remove = [UIContextualAction
-        contextualActionWithStyle:UIContextualActionStyleDestructive
-        title:MTDetailLocalized(@"theme.detail.delete")
-        handler:^(__unused UIContextualAction *action,
-                  __unused UIView *sourceView,
-                  void (^completionHandler)(BOOL)) {
-        [weakSelf.managerController
-            removeRevisionIdentifier:revision.revisionIdentifier
-            fromThemeIdentifier:weakSelf.themeIdentifier
-            completion:^(BOOL success, NSError *error) {
-            completionHandler(success);
-            if (!success) {
-                [weakSelf presentOperationError:error];
-            }
-        }];
-    }];
-    return [UISwipeActionsConfiguration configurationWithActions:@[ remove ]];
-}
-
 - (void)applyTheme:(id)sender {
     (void)sender;
     [self.managerController selectThemeIdentifier:self.themeIdentifier];
     __weak typeof(self) weakSelf = self;
     [self.managerController applySelectionWithCompletion:
-        ^(BOOL success, BOOL reloadRequired, NSError *error) {
+        ^(BOOL success, NSError *error) {
         typeof(self) self = weakSelf;
         if (self == nil) return;
         if (!success) {
@@ -1739,7 +1692,6 @@ static UIColor *MTDetailFeatureColor(MTThemeCapabilityItem *item) {
             [[MTApplyResultViewController alloc]
                 initWithThemeName:self.nameLabel.text
                   restoredStock:NO
-                 reloadRequired:reloadRequired
                managerController:self.managerController];
         [self presentViewController:resultController
                            animated:YES completion:nil];

@@ -4,7 +4,6 @@
       "binaryName": "MarkThemeRuntime",
       "filterBundles": [
         "com.apple.Preferences",
-        "com.apple.ShareSheet",
         "com.apple.SharingUIService",
         "com.apple.Spotlight",
         "com.apple.mobilephone",
@@ -29,85 +28,57 @@
         },
         {
           "adapters": [
-            "share-sheet.activity-image"
+            "share-sheet.activity-glyph"
           ],
           "bundleID": "com.apple.mobileslideshow",
           "executable": "MobileSlideShow",
           "mode": "processAdapters",
           "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
             "ui-resources.snapshot"
           ],
           "profileID": "photos.share-sheet.ui-icons"
         },
         {
           "adapters": [
-            "preferences.icon-image-cache",
-            "preferences.application-icon-image"
+            "preferences.ui-resource-image"
           ],
           "bundleID": "com.apple.Preferences",
           "executable": "Preferences",
           "mode": "processAdapters",
           "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
             "ui-resources.snapshot"
           ],
           "profileID": "preferences.ui-icons"
         },
         {
           "adapters": [
-            "share-sheet.activity-image"
-          ],
-          "bundleID": "com.apple.ShareSheet",
-          "executable": "ShareSheet",
-          "mode": "processAdapters",
-          "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
-            "ui-resources.snapshot"
-          ],
-          "profileID": "share-sheet.loaded-host.ui-icons"
-        },
-        {
-          "adapters": [
-            "share-sheet.activity-image"
+            "share-sheet.activity-glyph"
           ],
           "bundleID": "com.apple.SharingUIService",
           "executable": "SharingUIService",
           "mode": "processAdapters",
           "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
             "ui-resources.snapshot"
           ],
           "profileID": "share-sheet.ui-icons"
         },
         {
           "adapters": [
-            "share-sheet.activity-image"
+            "share-sheet.activity-glyph"
           ],
           "bundleID": "com.apple.sharingd",
           "executable": "sharingd",
           "mode": "processAdapters",
           "modules": [
-            "static-icons.snapshot",
-            "icon-mask.snapshot",
-            "icon-overlay.snapshot",
             "ui-resources.snapshot"
           ],
           "profileID": "sharingd.share-sheet.ui-icons"
         },
         {
           "adapters": [
-            "spotlight.icon-image-cache",
-            "springboard.clock-image-set",
-            "spotlight.search-ui-app-image"
+            "springboard-home.clock-icon-sources",
+            "calendar-ui-kit.dynamic-icon-source",
+            "spotlight.calendar-appearance"
           ],
           "bundleID": "com.apple.Spotlight",
           "executable": "Spotlight",
@@ -123,12 +94,14 @@
         },
         {
           "adapters": [
-            "springboard.icon-image-cache",
-            "springboard.notification-icon",
-            "springboard.clock-image-set",
-            "springboard.folder-image",
-            "springboard.badge-background",
-            "springboard.icon-shadow",
+            "springboard.notification-icon-source",
+            "springboard.icon-morph-carrier",
+            "calendar-ui-kit.dynamic-icon-source",
+            "springboard.calendar-appearance",
+            "springboard-home.clock-icon-sources",
+            "springboard-home.folder-icon-source",
+            "springboard-home.badge-source",
+            "springboard-home.icon-shadow-carrier",
             "springboard.statusbar-signal-image"
           ],
           "bundleID": "com.apple.springboard",
@@ -150,6 +123,6 @@
       ]
     }
   ],
-  "manifestDigest": "6d689742e84057f84054ebe3a63c147c21d4b47c6f1c049d667dacde00ef0f92",
+  "manifestDigest": "a4d56681bcaeec45a11eef9f0d9409cb5343020c3cddc616e1825ddbc5331a47",
   "schemaVersion": 2
 }

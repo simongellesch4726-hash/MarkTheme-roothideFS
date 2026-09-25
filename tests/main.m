@@ -36,6 +36,7 @@
 #import "MTIdentifier.h"
 #import "MTIconBundlesImporter.h"
 #import "MTIconMaskConfiguration.h"
+#import "MTIconServiceRuntimeTests.h"
 #import "MTIconMaskContract.h"
 #import "MTIconOverlayContract.h"
 #import "MTIconMaskModule.h"
@@ -51,13 +52,12 @@
 #import "MTModuleRegistry.h"
 #import "MTResourceKey.h"
 #import "MTRuntimeKernelTests.h"
+#import "MTRuntimeDiagnosticsProtocol.h"
 #import "MTRuntimePublishedImageLoader.h"
 #import "MTRuntimeProfileTests.h"
 #import "MTRuntimeReplacementTests.h"
 #import "MTRuntimeSnapshotResourceTests.h"
 #import "MTRuntimeStoreTests.h"
-#import "MTRuntimeTargetedRefreshTests.h"
-#import "MTRuntimeWeakObjectMapSnapshotTests.h"
 #import "MTRuntimeStressFixture.h"
 #import "MTSafeDirectoryScanner.h"
 #import "MTSafeImageDecoder.h"
@@ -925,71 +925,76 @@ static void MTTestModuleRegistry(void) {
              MTIconShadowCanvasPointDimension(
                  MTIconShadowSubjectIPadPro) == 153.0,
              @"icon-shadow contract must reject malformed configuration and preserve established canvas dimensions");
-    MTAssert([icons.processAdapters isEqualToArray:@[
-                 @"preferences.application-icon-image",
-                 @"share-sheet.activity-image",
-                 @"spotlight.icon-image-cache",
-                 @"spotlight.search-ui-app-image",
-                 @"springboard.icon-image-cache",
-             ]] &&
-             icons.refreshRequirement == MTRefreshRequirementTargeted &&
+    NSArray<NSString *> *applicationIconSourceAdapters = @[
+        @"iconservices.application-icon-source",
+        @"springboard.icon-morph-carrier",
+        @"springboard.notification-icon-source",
+    ];
+    MTAssert([icons.processAdapters
+                 isEqualToArray:applicationIconSourceAdapters] &&
+             icons.refreshRequirement == MTRefreshRequirementRespring &&
              [calendar.dependencies isEqualToArray:@[@"icons.static"]] &&
              [calendar.processAdapters isEqualToArray:@[
-                 @"spotlight.icon-image-cache",
-                 @"spotlight.search-ui-app-image",
-                 @"springboard.icon-image-cache",
+                 @"calendar-ui-kit.dynamic-icon-source",
+                 @"spotlight.calendar-appearance",
+                 @"springboard.calendar-appearance",
              ]] &&
-             calendar.refreshRequirement == MTRefreshRequirementTargeted &&
+             calendar.refreshRequirement == MTRefreshRequirementRespring &&
              [clock.dependencies isEqualToArray:@[@"icons.static"]] &&
              [clock.processAdapters
-                 isEqualToArray:@[@"springboard.clock-image-set"]] &&
-             clock.refreshRequirement == MTRefreshRequirementTargeted &&
+                 isEqualToArray:@[
+                    @"springboard-home.clock-icon-sources"]] &&
+             clock.refreshRequirement == MTRefreshRequirementRespring &&
              folders.dependencies.count == 0 &&
              [folders.processAdapters
-                 isEqualToArray:@[@"springboard.folder-image"]] &&
+                 isEqualToArray:@[
+                    @"springboard-home.folder-icon-source"]] &&
              [folders.resourceKinds isEqualToArray:@[
                  @"folder.background", @"folder.background.light",
              ]] &&
+             folders.refreshRequirement == MTRefreshRequirementRespring &&
              iconMask.dependencies.count == 0 &&
-             [iconMask.processAdapters isEqualToArray:@[
-                 @"preferences.application-icon-image",
-                 @"share-sheet.activity-image",
-                 @"spotlight.icon-image-cache",
-                 @"spotlight.search-ui-app-image",
-                 @"springboard.icon-image-cache",
-             ]] &&
+             [iconMask.processAdapters
+                 isEqualToArray:applicationIconSourceAdapters] &&
              [iconMask.resourceKinds
                  isEqualToArray:@[@"icon.mask", @"icon.pattern"]] &&
+             iconMask.refreshRequirement == MTRefreshRequirementRespring &&
+             iconOverlay.dependencies.count == 0 &&
+             [iconOverlay.processAdapters
+                 isEqualToArray:applicationIconSourceAdapters] &&
+             [iconOverlay.resourceKinds
+                 isEqualToArray:@[@"icon.overlay"]] &&
+             iconOverlay.refreshRequirement == MTRefreshRequirementRespring &&
              [uiResources.processAdapters
                  isEqualToArray:@[
-                    @"preferences.icon-image-cache",
-                    @"share-sheet.activity-image",
+                    @"preferences.ui-resource-image",
+                    @"share-sheet.activity-glyph",
                  ]] &&
              [uiResources.resourceKinds isEqualToArray:@[
                     @"ui.preferences.icon",
                     @"ui.share.activity",
                  ]] &&
              uiResources.dependencies.count == 0 &&
-             uiResources.refreshRequirement == MTRefreshRequirementTargeted &&
+             uiResources.refreshRequirement == MTRefreshRequirementRespring &&
              [badges.processAdapters
-                 isEqualToArray:@[@"springboard.badge-background"]] &&
+                 isEqualToArray:@[@"springboard-home.badge-source"]] &&
              [badges.resourceKinds isEqualToArray:@[@"badge.background"]] &&
-             badges.refreshRequirement == MTRefreshRequirementTargeted &&
+             badges.refreshRequirement == MTRefreshRequirementRespring &&
              [dialer.processAdapters
                  isEqualToArray:@[@"mobilephone.dialer-buttons"]] &&
              [dialer.resourceKinds
                  isEqualToArray:@[@"ui.phone.dialer-image"]] &&
-             [iconShadows.processAdapters
-                 isEqualToArray:@[@"springboard.icon-shadow"]] &&
+            [iconShadows.processAdapters
+                isEqualToArray:@[@"springboard-home.icon-shadow-carrier"]] &&
              [iconShadows.resourceKinds isEqualToArray:@[@"icon.shadow"]] &&
              [statusBar.processAdapters isEqualToArray:@[
                  @"springboard.statusbar-signal-image",
              ]] &&
              [statusBar.resourceKinds
                  isEqualToArray:@[@"ui.statusbar-image"]] &&
-             dialer.refreshRequirement == MTRefreshRequirementTargeted &&
-             iconShadows.refreshRequirement == MTRefreshRequirementTargeted &&
-             statusBar.refreshRequirement == MTRefreshRequirementTargeted,
+             dialer.refreshRequirement == MTRefreshRequirementRespring &&
+             iconShadows.refreshRequirement == MTRefreshRequirementRespring &&
+             statusBar.refreshRequirement == MTRefreshRequirementRespring,
              @"built-in modules must declare their exact process adapters");
     MTAssert(MTDialerButtonPointDimension == 75.0 &&
              MTDialerNumberButtonSubjects().count == 12 &&
@@ -1112,6 +1117,35 @@ static void MTTestPlatformPaths(void) {
     MTAssert([rootless resolvedPathForLogicalPath:@"/var/../etc/passwd"
                                            error:&error] == nil && error != nil,
              @"logical path traversal must fail");
+
+    uint64_t now = UINT64_C(0x00fffff0);
+    uint16_t port = 49152;
+    uint32_t nonce = UINT32_C(0xabc123);
+    uint64_t requestWord = MTRuntimeDiagnosticsCollectionRequestWord(
+        port, nonce, now + 32);
+    MTRuntimeDiagnosticsCollectionRequest request = {0};
+    MTAssert(requestWord != 0 &&
+             MTRuntimeDiagnosticsDecodeCollectionRequestWord(
+                 requestWord, now, &request),
+             @"diagnostics request must survive the wrapped 24-bit expiry boundary");
+    MTAssert(request.port == port && request.nonce == nonce &&
+             request.expirationUnixTime == now + 32,
+             @"diagnostics request must preserve its exact port, nonce, and bounded lifetime");
+    MTAssert(MTRuntimeDiagnosticsCollectionRequestWord(
+                 0, nonce, now + 1) == 0 &&
+             MTRuntimeDiagnosticsCollectionRequestWord(
+                 port, 0, now + 1) == 0,
+             @"diagnostics request must reject inactive ports and nonces");
+    uint64_t expiredWord = MTRuntimeDiagnosticsCollectionRequestWord(
+        port, nonce, now);
+    MTAssert(!MTRuntimeDiagnosticsDecodeCollectionRequestWord(
+                 expiredWord, now, &request),
+             @"diagnostics request must reject an expired session");
+    uint64_t unboundedWord = MTRuntimeDiagnosticsCollectionRequestWord(
+        port, nonce, now + MTRuntimeDiagnosticsMaximumSessionSeconds + 1);
+    MTAssert(!MTRuntimeDiagnosticsDecodeCollectionRequestWord(
+                 unboundedWord, now, &request),
+             @"diagnostics request must reject a lifetime beyond the fixed session bound");
 }
 
 static NSString *MTCreateTemporaryDirectory(NSString *label) {
@@ -2778,6 +2812,40 @@ static MTThemeImportMetadata *MTTestThemeInfoMetadataMapper(void) {
                  themedBundleIdentifierCandidatesForRequestedIdentifier:
                      @"../invalid"].count == 0,
         @"static icon matching must preserve alias-first lookup while exposing every deterministic fuzzy fallback");
+
+    MTStaticIconConfiguration *layeredMatching = [MTStaticIconConfiguration
+        configurationWithOrderedMatchingLayers:@[
+            @{
+                @"bundleAliases" : @{
+                    @"TEAM.com.example.target" : @"com.example.primary",
+                },
+                @"fuzzyBundleIdentifiers" : @[@"example.target"],
+            },
+            @{
+                @"bundleAliases" : @{
+                    @"TEAM.com.example.target" : @"com.example.secondary",
+                },
+                @"fuzzyBundleIdentifiers" : @[@"com.example.target"],
+            },
+        ]];
+    MTAssert(layeredMatching.usesOrderedMatchingLayers &&
+             layeredMatching.orderedMatchingLayers.count == 2 &&
+             [[[layeredMatching
+                 themedBundleIdentifierCandidatesForRequestedIdentifier:
+                     @"TEAM.com.example.target"
+                 matchingLayerAtIndex:0] firstObject]
+                 isEqualToString:@"com.example.primary"] &&
+             [[[layeredMatching
+                 themedBundleIdentifierCandidatesForRequestedIdentifier:
+                     @"TEAM.com.example.target"
+                 matchingLayerAtIndex:1] firstObject]
+                 isEqualToString:@"com.example.secondary"] &&
+             MTStaticIconSourceVariantIsSupported(
+                 MTStaticIconSourceVariantForMatchingLayer(
+                     MTStaticIconSourceVariantPrimary, 2)) &&
+             MTStaticIconSourceVariantForMatchingLayer(
+                 MTStaticIconSourceVariantPrimary, 3) == nil,
+        @"ordered static-icon matching layers and their bounded Generation variants must preserve source rank");
 
     MTThemeInfoMetadataMapper *matchingMapper =
         [[MTThemeInfoMetadataMapper alloc] init];
@@ -4892,67 +4960,6 @@ static void MTTestLegacyIconOverlayImport(void) {
     [NSFileManager.defaultManager removeItemAtPath:root error:NULL];
 }
 
-static void MTTestThemeLibrary(MTThemeManifest *manifest) {
-    NSString *libraryRoot = MTCreateTemporaryDirectory(@"library");
-    MTThemeLibraryStore *library = [[MTThemeLibraryStore alloc]
-        initWithRootURL:[NSURL fileURLWithPath:libraryRoot isDirectory:YES]];
-    NSError *error = nil;
-    NSString *firstDigest = [library saveManifestRevision:manifest error:&error];
-    MTThemeManifest *loaded = [library
-        loadCurrentManifestForThemeID:manifest.themeID error:&error];
-    MTAssert(firstDigest != nil && [loaded.themeID isEqualToString:manifest.themeID],
-             @"library must atomically save and reload a canonical manifest");
-    MTAssert([[loaded contentDigestWithError:&error] isEqualToString:firstDigest],
-             @"library readback must preserve the canonical digest");
-    MTAssert([[library saveManifestRevision:manifest error:&error]
-                 isEqualToString:firstDigest],
-             @"saving an identical manifest revision must be idempotent");
-
-    MTThemeManifest *changed = [[MTThemeManifest alloc]
-        initWithThemeID:manifest.themeID
-             displayName:@"Fixture Revised"
-                  author:manifest.author
-            themeVersion:@"2"
-              importerID:manifest.importerID
-         importerVersion:manifest.importerVersion
-       sourceFingerprint:manifest.sourceFingerprint
-            capabilities:manifest.capabilities
-    moduleConfigurations:manifest.moduleConfigurations
-               resources:manifest.resources
-                   error:&error];
-    NSString *secondDigest = [library saveManifestRevision:changed error:&error];
-    MTThemeManifest *current = [library
-        loadCurrentManifestForThemeID:manifest.themeID error:&error];
-    MTAssert(secondDigest != nil && ![secondDigest isEqualToString:firstDigest] &&
-             [current.displayName isEqualToString:@"Fixture Revised"],
-             @"new library revision must atomically replace only the current pointer");
-
-    NSString *themesPath = [libraryRoot stringByAppendingPathComponent:@"themes"];
-    NSArray<NSString *> *storageIDs = [NSFileManager.defaultManager
-        contentsOfDirectoryAtPath:themesPath error:&error];
-    MTAssert(storageIDs.count == 1 && [storageIDs.firstObject hasPrefix:@"t-"] &&
-             ![storageIDs.firstObject containsString:manifest.themeID],
-             @"theme ID must be mapped to a controlled storage identifier");
-    NSString *revisionsPath = [[[themesPath
-        stringByAppendingPathComponent:storageIDs.firstObject]
-        stringByAppendingPathComponent:@"revisions"] copy];
-    NSArray *revisions = [NSFileManager.defaultManager
-        contentsOfDirectoryAtPath:revisionsPath error:&error];
-    MTAssert(revisions.count == 2,
-             @"publishing a new manifest must preserve the previous revision");
-    NSString *currentManifestPath = [[revisionsPath
-        stringByAppendingPathComponent:secondDigest]
-        stringByAppendingPathComponent:@"manifest.json"];
-    MTAssert([[@"tampered" dataUsingEncoding:NSUTF8StringEncoding]
-        writeToFile:currentManifestPath options:0 error:&error],
-        @"library corruption fixture must be written");
-    error = nil;
-    MTAssert([library loadCurrentManifestForThemeID:manifest.themeID
-                                              error:&error] == nil && error != nil,
-        @"library readback must reject a corrupted current manifest");
-    [NSFileManager.defaultManager removeItemAtPath:libraryRoot error:NULL];
-}
-
 static MTAssetStagingSession *_Nullable MTStageLibraryFixtureAssets(
     MTAssetStagingConfiguration *configuration,
     id<MTAuditedSource> source,
@@ -5147,15 +5154,13 @@ static void MTTestFormalThemeLibraryTransaction(void) {
 
     MTThemeLibraryRevision *loaded = [library
         loadCurrentRevisionForThemeID:manifest.themeID error:&error];
-    MTThemeManifest *metadataLoaded = [library
-        loadCurrentManifestForThemeID:manifest.themeID error:&error];
-    MTAssert(loaded != nil && metadataLoaded != nil && error == nil &&
+    MTAssert(loaded != nil && error == nil &&
              [loaded.revisionIdentifier
                 isEqualToString:firstRevision.revisionIdentifier] &&
              [loaded.manifestDigest isEqualToString:
                 [manifest contentDigestWithError:&error]] &&
-             [metadataLoaded.displayName isEqualToString:@"Formal Fixture"],
-        @"formal current reads must validate every asset and support manifest callers");
+             [loaded.manifest.displayName isEqualToString:@"Formal Fixture"],
+        @"formal current reads must validate every asset and preserve metadata");
 
     error = nil;
     MTAssetStagingSession *duplicateSession = MTStageLibraryFixtureAssets(
@@ -5339,11 +5344,13 @@ static void MTTestFormalThemeLibraryTransaction(void) {
              [changedRevision.revisionIdentifier
                 isEqualToString:changedRevisionID] &&
              [[revisionNames filteredArrayUsingPredicate:
-                formalRevisionPredicate] count] == 2 &&
+                formalRevisionPredicate] count] == 1 &&
+             access(firstRevision.assetURLsByContentSHA256[primaryDigest]
+                .path.fileSystemRepresentation, F_OK) != 0 &&
              [[[library loadCurrentRevisionForThemeID:manifest.themeID
                 error:&error] manifest].displayName
                 isEqualToString:@"Formal Fixture Revised"],
-        @"a second formal commit must switch current while preserving the old revision");
+        @"a second formal commit must atomically replace and collect the old theme snapshot");
 
     NSString *changedRevisionPathPublished = [revisionsPath
         stringByAppendingPathComponent:changedRevision.revisionIdentifier];
@@ -5371,9 +5378,7 @@ static void MTTestFormalThemeLibraryTransaction(void) {
     error = nil;
     MTAssert([library loadCurrentRevisionForThemeID:manifest.themeID
                                                 error:&error] == nil &&
-             error.code == MTThemeLibraryStoreErrorVerification &&
-             [library loadCurrentManifestForThemeID:manifest.themeID
-                                               error:NULL] == nil,
+             error.code == MTThemeLibraryStoreErrorVerification,
         @"formal reads must fail closed on complete asset checksum corruption");
 
     [NSFileManager.defaultManager removeItemAtPath:root error:NULL];
@@ -5499,13 +5504,12 @@ static void MTTestThemeLibraryCatalog(void) {
     MTThemeLibraryThemeSummary *theme = catalog.firstObject;
     MTAssert(catalog.count == 1 && error == nil &&
              [theme.themeID isEqualToString:firstManifest.themeID] &&
-             theme.revisionCount == 2 && theme.formalRevisionCount == 2 &&
-             theme.legacyRevisionCount == 0 && !theme.requiresReimport &&
-             theme.revisionHistory.count == theme.revisionCount &&
-             theme.revisionHistory.firstObject == theme.currentRevision &&
              [theme.currentRevision.revisionIdentifier
-                isEqualToString:secondRevision.revisionIdentifier],
-        @"catalog must retain one immutable history read model without a persisted index");
+                isEqualToString:secondRevision.revisionIdentifier] &&
+             theme.currentRevision.assetCount == 2 &&
+             theme.currentRevision.assetByteCount ==
+                primaryData.length + secondaryData.length,
+        @"catalog must expose only the current replacement without a persisted index");
 
     NSString *previewPrimaryDigest = [source.inventory
         fileAtRelativePath:@"Assets/Primary.bin"].contentSHA256;
@@ -5573,18 +5577,6 @@ static void MTTestThemeLibraryCatalog(void) {
         @"bounded preview checksum fixture must restore the current asset");
 
     error = nil;
-    NSArray<MTThemeLibraryRevisionSummary *> *history = [library
-        loadRevisionHistoryForThemeID:firstManifest.themeID
-        cancellationToken:nil error:&error];
-    MTAssert(history.count == 2 && history.firstObject.isCurrent &&
-             [history.firstObject.revisionIdentifier
-                isEqualToString:secondRevision.revisionIdentifier] &&
-             !history.lastObject.isCurrent &&
-             history.firstObject.assetCount == 2 &&
-             history.firstObject.assetByteCount ==
-                primaryData.length + secondaryData.length,
-        @"history must order current first and expose verified aggregate metadata");
-
     NSString *normalizedThemeID = MTNormalizeIdentifier(firstManifest.themeID,
                                                         NULL);
     NSString *storageDigest = MTSHA256HexDigestForData(
@@ -5596,6 +5588,18 @@ static void MTTestThemeLibraryCatalog(void) {
         stringByAppendingPathComponent:storageID] copy];
     NSString *revisionsPath = [themePath
         stringByAppendingPathComponent:@"revisions"];
+    NSString *firstRevisionPath = [revisionsPath
+        stringByAppendingPathComponent:firstRevision.revisionIdentifier];
+    NSString *secondRevisionPath = [revisionsPath
+        stringByAppendingPathComponent:secondRevision.revisionIdentifier];
+    NSArray<NSString *> *publishedNames = [NSFileManager.defaultManager
+        contentsOfDirectoryAtPath:revisionsPath error:&error];
+    MTAssert(error == nil && publishedNames.count == 1 &&
+             [publishedNames.firstObject
+                isEqualToString:secondRevision.revisionIdentifier] &&
+             access(firstRevisionPath.fileSystemRepresentation, F_OK) != 0,
+        @"importing the same theme must retain only the replacement snapshot");
+
     NSString *lockPath = [themePath
         stringByAppendingPathComponent:@"transaction.lock"];
     int heldLock = open(lockPath.fileSystemRepresentation,
@@ -5603,153 +5607,28 @@ static void MTTestThemeLibraryCatalog(void) {
     MTAssert(heldLock >= 0 && flock(heldLock, LOCK_EX | LOCK_NB) == 0,
         @"catalog contention fixture must hold the per-theme exclusive lock");
     error = nil;
-    MTAssert([library loadRevisionHistoryForThemeID:firstManifest.themeID
-        cancellationToken:nil error:&error] == nil &&
+    MTAssert([library loadThemeCatalogWithCancellationToken:nil
+                                                     error:&error] == nil &&
              error.code == MTThemeLibraryStoreErrorBusy &&
              flock(heldLock, LOCK_UN) == 0 && close(heldLock) == 0,
-        @"history reads must fail quickly while a mutation owns the theme lock");
+        @"catalog reads must fail quickly while a replacement owns the theme lock");
 
-    NSString *primaryDigest = [source.inventory
-        fileAtRelativePath:@"Assets/Primary.bin"].contentSHA256;
-    NSURL *firstPrimaryURL =
-        firstRevision.assetURLsByContentSHA256[primaryDigest];
-    NSMutableData *corruptPrimary = [primaryData mutableCopy];
-    ((uint8_t *)corruptPrimary.mutableBytes)[0] ^= 0xff;
-    MTAssert([corruptPrimary writeToURL:firstPrimaryURL options:0 error:&error] &&
-             chmod(firstPrimaryURL.path.fileSystemRepresentation, 0600) == 0,
-        @"catalog checksum-boundary fixture must preserve asset metadata");
-    error = nil;
-    history = [library loadRevisionHistoryForThemeID:firstManifest.themeID
-        cancellationToken:nil error:&error];
-    MTAssert(history.count == 2 && error == nil,
-        @"metadata-only history must avoid rehashing every asset during listing");
-    error = nil;
-    MTAssert([library switchCurrentRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:firstRevision.revisionIdentifier
-        cancellationToken:nil error:&error] == nil &&
-             error.code == MTThemeLibraryStoreErrorVerification &&
-             [[[library loadCurrentRevisionForThemeID:firstManifest.themeID
-                error:NULL] revisionIdentifier]
-                isEqualToString:secondRevision.revisionIdentifier],
-        @"switch-current must fully hash its target and preserve current on corruption");
-    MTAssert([primaryData writeToURL:firstPrimaryURL options:0 error:&error] &&
-             chmod(firstPrimaryURL.path.fileSystemRepresentation, 0600) == 0,
-        @"catalog checksum-boundary fixture must restore the formal asset");
-
-    MTImportCancellationToken *cancelledSwitch =
-        [[MTImportCancellationToken alloc] init];
-    [cancelledSwitch cancel];
-    error = nil;
-    MTAssert([library switchCurrentRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:firstRevision.revisionIdentifier
-        cancellationToken:cancelledSwitch error:&error] == nil &&
-             error.code == MTThemeLibraryStoreErrorCancelled,
-        @"a pre-cancelled revision switch must not acquire or mutate Library state");
-    error = nil;
-    MTThemeLibraryRevision *switched = [library
-        switchCurrentRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:firstRevision.revisionIdentifier
-        cancellationToken:nil error:&error];
-    MTAssert(switched != nil && error == nil &&
-             [switched.revisionIdentifier
-                isEqualToString:firstRevision.revisionIdentifier] &&
-             [[[library loadCurrentRevisionForThemeID:firstManifest.themeID
-                error:&error] manifest].displayName
-                isEqualToString:@"Catalog Fixture"],
-        @"a verified formal revision must atomically become current");
-
-    error = nil;
-    MTAssert(![library removeRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:firstRevision.revisionIdentifier
-        cancellationToken:nil error:&error] &&
-             error.code == MTThemeLibraryStoreErrorCurrentRevision,
-        @"Library garbage collection must reject the current revision");
-    MTImportCancellationToken *cancelledRemoval =
-        [[MTImportCancellationToken alloc] init];
-    [cancelledRemoval cancel];
-    NSString *secondRevisionPath = [revisionsPath
-        stringByAppendingPathComponent:secondRevision.revisionIdentifier];
-    error = nil;
-    MTAssert(![library removeRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:secondRevision.revisionIdentifier
-        cancellationToken:cancelledRemoval error:&error] &&
-             error.code == MTThemeLibraryStoreErrorCancelled &&
-             access(secondRevisionPath.fileSystemRepresentation, F_OK) == 0,
-        @"cancellation before quarantine must leave a non-current revision published");
-    error = nil;
-    MTAssert([library removeRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:secondRevision.revisionIdentifier
-        cancellationToken:nil error:&error] && error == nil &&
-             access(secondRevisionPath.fileSystemRepresentation, F_OK) != 0 &&
-             [library loadRevisionHistoryForThemeID:firstManifest.themeID
-                cancellationToken:nil error:&error].count == 1,
-        @"removing a non-current formal revision must collect its self-contained tree");
-
-    secondRevision = MTCommitCatalogFixtureRevision(library,
-        stagingConfiguration, source, secondManifest, &error);
-    switched = [library switchCurrentRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:firstRevision.revisionIdentifier
-        cancellationToken:nil error:&error];
-    NSString *deletionName = [@".deletion-" stringByAppendingString:
-        NSUUID.UUID.UUIDString.lowercaseString];
-    NSString *deletionPath = [revisionsPath
-        stringByAppendingPathComponent:deletionName];
-    secondRevisionPath = [revisionsPath
-        stringByAppendingPathComponent:secondRevision.revisionIdentifier];
-    MTAssert(secondRevision != nil && switched != nil && error == nil &&
-             rename(secondRevisionPath.fileSystemRepresentation,
-                    deletionPath.fileSystemRepresentation) == 0,
-        @"abandoned deletion fixture must quarantine a non-current formal revision");
+    // Simulate a pre-upgrade Library that still has one superseded snapshot.
+    // Startup recovery should converge it to the overwrite-only layout.
+    MTAssert([NSFileManager.defaultManager copyItemAtPath:secondRevisionPath
+                                               toPath:firstRevisionPath
+                                                error:&error],
+        @"superseded snapshot recovery fixture must be created");
     error = nil;
     MTAssert([library recoverAbandonedLibraryOperationsWithError:&error] &&
              error == nil &&
-             access(deletionPath.fileSystemRepresentation, F_OK) != 0 &&
-             access(secondRevisionPath.fileSystemRepresentation, F_OK) != 0 &&
+             access(firstRevisionPath.fileSystemRepresentation, F_OK) != 0 &&
+             access(secondRevisionPath.fileSystemRepresentation, F_OK) == 0 &&
              [[[library loadCurrentRevisionForThemeID:firstManifest.themeID
                 error:&error] revisionIdentifier]
-                isEqualToString:firstRevision.revisionIdentifier],
-        @"startup recovery must finish a quarantined deletion without changing current");
-
-    error = nil;
-    NSString *legacyDigest = [library saveManifestRevision:secondManifest
-                                                      error:&error];
-    catalog = [library loadThemeCatalogWithCancellationToken:nil error:&error];
-    theme = catalog.firstObject;
-    history = [library loadRevisionHistoryForThemeID:firstManifest.themeID
-        cancellationToken:nil error:&error];
-    MTAssert(legacyDigest != nil && catalog.count == 1 && history.count == 2 &&
-             error == nil && theme.requiresReimport &&
-             theme.formalRevisionCount == 1 &&
-             theme.legacyRevisionCount == 1 &&
-             history.firstObject.requiresReimport &&
-             [history.firstObject.revisionIdentifier
-                isEqualToString:legacyDigest],
-        @"catalog must identify legacy manifest-only current data without faking migration");
-    error = nil;
-    MTAssert([library loadCurrentRevisionForThemeID:firstManifest.themeID
-        error:&error] == nil &&
-             error.code == MTThemeLibraryStoreErrorUnsupportedVersion,
-        @"formal content consumers must reject a legacy manifest-only current revision");
-    NSString *legacyPath = [revisionsPath
-        stringByAppendingPathComponent:legacyDigest];
-    error = nil;
-    MTAssert(![library removeRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:legacyDigest cancellationToken:nil error:&error] &&
-             error.code == MTThemeLibraryStoreErrorUnsupportedVersion &&
-             access(legacyPath.fileSystemRepresentation, F_OK) == 0,
-        @"R1 garbage collection must leave compatibility-only legacy revisions untouched");
-    error = nil;
-    switched = [library switchCurrentRevisionForThemeID:firstManifest.themeID
-        revisionIdentifier:firstRevision.revisionIdentifier
-        cancellationToken:nil error:&error];
-    MTAssert(switched != nil && error == nil &&
-             [library loadRevisionHistoryForThemeID:firstManifest.themeID
-                cancellationToken:nil error:&error].firstObject.format ==
-                MTThemeLibraryRevisionFormatFormalV1,
-        @"a verified formal revision must recover current state from legacy compatibility data");
-
-    // Whole-theme deletion removes the current revision too, which
-    // per-revision garbage collection deliberately refuses to do.
+                isEqualToString:secondRevision.revisionIdentifier],
+        @"startup recovery must remove superseded snapshots without changing current");
+    // Whole-theme deletion removes the one current snapshot.
     error = nil;
     MTImportCancellationToken *cancelledThemeRemoval =
         [[MTImportCancellationToken alloc] init];
@@ -5770,7 +5649,7 @@ static void MTTestThemeLibraryCatalog(void) {
              access(themePath.fileSystemRepresentation, F_OK) != 0 &&
              [library loadThemeCatalogWithCancellationToken:nil
                                                       error:&error].count == 0,
-        @"removing a theme must collect its current revision, legacy data and whole tree");
+        @"removing a theme must collect its current snapshot and whole tree");
     error = nil;
     MTAssert([library recoverAbandonedLibraryOperationsWithError:&error] &&
              error == nil,
@@ -6373,13 +6252,21 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
 
     NSString *alternateSourceRoot = MTCreateTemporaryDirectory(
         @"snowboard-mix-alternate-source");
+    NSString *thirdSourceRoot = MTCreateTemporaryDirectory(
+        @"snowboard-mix-third-source");
     NSData *alternatePNG = MTPNGFixtureData(91, 91, 8, 6, 0, YES, @[], @[]);
+    NSData *thirdPNG = MTPNGFixtureData(95, 95, 8, 6, 0, YES, @[], @[]);
     NSData *alternateOverlayPNG =
         MTPNGFixtureData(93, 93, 8, 6, 0, YES, @[], @[]);
     NSDictionary<NSString *, NSData *> *alternateFiles = @{
         @"Alternate.theme/Info.plist" : MTPropertyListFixtureData(@{
             @"PackageName" : @"Alternate Mix Source",
+            @"FuzzyBundleIdentifiers" : @[@"com.example.Alternate"],
+            @"BundleAliases" : @{
+                @"shared.fallback.request" : @"com.example.Alternate",
+            },
         }, NSPropertyListBinaryFormat_v1_0),
+        @"Alternate.theme/IconBundles/com.example.App.png" : alternatePNG,
         @"Alternate.theme/IconBundles/com.example.Alternate.png" : alternatePNG,
         @"Alternate.theme/Bundles/com.apple.springboard/SBBadgeBG@2x.png" :
             alternatePNG,
@@ -6398,6 +6285,29 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
                                                 error:&error],
             @"Cross-theme mix fixture must write its alternate source");
     }
+    NSDictionary<NSString *, NSData *> *thirdFiles = @{
+        @"Third.theme/Info.plist" : MTPropertyListFixtureData(@{
+            @"PackageName" : @"Third Mix Source",
+            @"FuzzyBundleIdentifiers" : @[@"com.example.Third"],
+            @"BundleAliases" : @{
+                @"shared.fallback.request" : @"com.example.Third",
+                @"third.fallback.request" : @"com.example.Third",
+            },
+        }, NSPropertyListBinaryFormat_v1_0),
+        @"Third.theme/IconBundles/com.example.Alternate.png" : thirdPNG,
+        @"Third.theme/IconBundles/com.example.Third.png" : thirdPNG,
+    };
+    for (NSString *relativePath in thirdFiles) {
+        NSString *path = [thirdSourceRoot
+            stringByAppendingPathComponent:relativePath];
+        MTAssert([NSFileManager.defaultManager
+            createDirectoryAtPath:path.stringByDeletingLastPathComponent
+      withIntermediateDirectories:YES
+                       attributes:@{NSFilePosixPermissions : @0700}
+                            error:&error] &&
+            [thirdFiles[relativePath] writeToFile:path options:0 error:&error],
+            @"Cross-theme mix fixture must write its third source");
+    }
     MTPreparedThemeImport *alternatePrepared = [pipeline
         prepareDirectoryThemeAtURL:
             [NSURL fileURLWithPath:alternateSourceRoot isDirectory:YES]
@@ -6408,6 +6318,17 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
         progressHandler:nil error:&error];
     MTThemeComponentCatalog *alternateCatalog = alternateRevision == nil ? nil :
         [MTThemeComponentCatalog catalogForManifest:alternateRevision.manifest
+                                               error:&error];
+    MTPreparedThemeImport *thirdPrepared = [pipeline
+        prepareDirectoryThemeAtURL:
+            [NSURL fileURLWithPath:thirdSourceRoot isDirectory:YES]
+        sourceName:@"Third"
+        cancellationToken:nil progressHandler:nil error:&error];
+    MTThemeLibraryRevision *thirdRevision = [pipeline
+        commitPreparedImport:thirdPrepared cancellationToken:nil
+        progressHandler:nil error:&error];
+    MTThemeComponentCatalog *thirdCatalog = thirdRevision == nil ? nil :
+        [MTThemeComponentCatalog catalogForManifest:thirdRevision.manifest
                                                error:&error];
     NSDictionary<NSString *, MTThemeLibraryRevision *> *mixRevisions =
         alternateRevision == nil ? @{} : @{
@@ -6436,6 +6357,51 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
                     alternateRevision.manifest,
                     alternateCatalog.defaultSelection),
         };
+    NSDictionary<NSString *, MTThemeLibraryRevision *> *fallbackRevisions =
+        thirdRevision == nil ? @{} : @{
+            revision.manifest.themeID : revision,
+            alternateRevision.manifest.themeID : alternateRevision,
+            thirdRevision.manifest.themeID : thirdRevision,
+        };
+    NSDictionary<NSString *, NSString *> *fallbackRevisionIdentifiers =
+        thirdRevision == nil ? @{} : @{
+            revision.manifest.themeID : revision.revisionIdentifier,
+            alternateRevision.manifest.themeID :
+                alternateRevision.revisionIdentifier,
+            thirdRevision.manifest.themeID : thirdRevision.revisionIdentifier,
+        };
+    NSDictionary<NSString *, MTThemeComponentSelection *> *fallbackComponents =
+        thirdCatalog == nil ? @{} : @{
+            revision.manifest.themeID : customSelection,
+            alternateRevision.manifest.themeID :
+                alternateCatalog.defaultSelection,
+            thirdRevision.manifest.themeID : thirdCatalog.defaultSelection,
+        };
+    NSDictionary<NSString *, NSSet<NSString *> *> *fallbackAvailableFeatures =
+        thirdCatalog == nil ? @{} : @{
+            revision.manifest.themeID :
+                mixAvailableFeatures[revision.manifest.themeID],
+            alternateRevision.manifest.themeID :
+                mixAvailableFeatures[alternateRevision.manifest.themeID],
+            thirdRevision.manifest.themeID :
+                MTThemeRuntimeApplicableFeatureIdentifiersForSelection(
+                    thirdRevision.manifest, thirdCatalog.defaultSelection),
+        };
+    MTThemeMixSelection *fallbackMix = [MTThemeMixSelection
+        selectionWithBaseThemeIdentifier:revision.manifest.themeID
+        sourceThemeIdentifiersByFeature:@{}
+        appIconFallbackThemeIdentifiers:@[
+            alternateRevision.manifest.themeID ?: @"",
+            thirdRevision.manifest.themeID ?: @"",
+        ]
+        disabledFeatureIdentifiers:@[]
+        revisionIdentifiersByThemeIdentifier:fallbackRevisionIdentifiers
+        componentSelectionsByThemeIdentifier:fallbackComponents
+        error:&error];
+    MTCompiledGeneration *fallbackGeneration = fallbackMix == nil ? nil :
+        [[MTStaticIconCompiler defaultCompiler]
+            compileLibraryRevisionsByThemeIdentifier:fallbackRevisions
+            mixSelection:fallbackMix cancellationToken:nil error:&error];
     MTThemeMixSelection *mixSelection = [MTThemeMixSelection
         selectionWithBaseThemeIdentifier:revision.manifest.themeID
         sourceThemeIdentifiersByFeature:@{
@@ -6551,6 +6517,88 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
             [record.canonicalResourceKey
                 containsString:MTIconOverlayModuleID];
     }
+    NSString *baseDigest = MTSHA256HexDigestForData(png);
+    NSString *alternateDigest = MTSHA256HexDigestForData(alternatePNG);
+    NSString *thirdDigest = MTSHA256HexDigestForData(thirdPNG);
+    BOOL sawBasePriorityIcon = NO;
+    BOOL basePriorityIconIsCorrect = YES;
+    BOOL basePriorityLayerIsCorrect = YES;
+    BOOL sawSecondPriorityIcon = NO;
+    BOOL secondPriorityIconIsCorrect = YES;
+    BOOL secondPriorityLayerIsCorrect = YES;
+    BOOL sawThirdPriorityIcon = NO;
+    BOOL thirdPriorityIconIsCorrect = YES;
+    BOOL thirdPriorityLayerIsCorrect = YES;
+    for (NSUInteger index = 0;
+         index < fallbackGeneration.index.recordCount; index++) {
+        MTGenerationIndexRecord *record = [fallbackGeneration.index
+            recordAtIndex:index];
+        if (![record.canonicalResourceKey containsString:@"icons.static"]) {
+            continue;
+        }
+        if ([record.canonicalResourceKey containsString:@"com.example.App"]) {
+            sawBasePriorityIcon = YES;
+            basePriorityIconIsCorrect = basePriorityIconIsCorrect &&
+                [record.contentSHA256 isEqualToString:baseDigest];
+            basePriorityLayerIsCorrect = basePriorityLayerIsCorrect &&
+                [record.canonicalResourceKey containsString:@"mix0-"];
+        } else if ([record.canonicalResourceKey
+                containsString:@"com.example.Alternate"]) {
+            sawSecondPriorityIcon = YES;
+            secondPriorityIconIsCorrect = secondPriorityIconIsCorrect &&
+                [record.contentSHA256 isEqualToString:alternateDigest];
+            secondPriorityLayerIsCorrect = secondPriorityLayerIsCorrect &&
+                [record.canonicalResourceKey containsString:@"mix1-"];
+        } else if ([record.canonicalResourceKey
+                containsString:@"com.example.Third"]) {
+            sawThirdPriorityIcon = YES;
+            thirdPriorityIconIsCorrect = thirdPriorityIconIsCorrect &&
+                [record.contentSHA256 isEqualToString:thirdDigest];
+            thirdPriorityLayerIsCorrect = thirdPriorityLayerIsCorrect &&
+                [record.canonicalResourceKey containsString:@"mix2-"];
+        }
+    }
+    MTStaticIconConfiguration *fallbackConfiguration =
+        [[MTStaticIconConfiguration alloc]
+            initWithDictionary:fallbackGeneration.descriptor
+                .moduleConfigurations[@"icons.static"]
+                         error:NULL];
+    BOOL savedFallbackMix = [selectionStore
+        saveMixSelection:fallbackMix error:&error];
+    MTThemeMixSelection *loadedFallbackMix = [selectionStore
+        mixSelectionForBaseThemeIdentifier:revision.manifest.themeID
+        revisionIdentifiersByThemeIdentifier:fallbackRevisionIdentifiers
+        componentSelectionsByThemeIdentifier:fallbackComponents
+        availableFeatureIdentifiersByThemeIdentifier:fallbackAvailableFeatures];
+    MTThemeMixSelection *compactedFallbackMix = [fallbackMix
+        selectionBySettingAppIconFallbackThemeIdentifier:nil
+        atIndex:0
+        revisionIdentifiersByThemeIdentifier:fallbackRevisionIdentifiers
+        componentSelectionsByThemeIdentifier:fallbackComponents
+        error:&error];
+    MTThemeMixSelection *disabledFallbackMix = [fallbackMix
+        selectionBySettingFeatureIdentifier:MTThemeFeatureAppIcons
+        enabled:NO error:&error];
+    MTCompiledGeneration *disabledFallbackGeneration =
+        disabledFallbackMix == nil ? nil :
+        [[MTStaticIconCompiler defaultCompiler]
+            compileLibraryRevisionsByThemeIdentifier:@{
+                revision.manifest.themeID : revision,
+            }
+            mixSelection:disabledFallbackMix cancellationToken:nil
+            error:&error];
+    NSError *duplicateFallbackError = nil;
+    MTThemeMixSelection *duplicateFallbackMix = [MTThemeMixSelection
+        selectionWithBaseThemeIdentifier:revision.manifest.themeID
+        sourceThemeIdentifiersByFeature:@{}
+        appIconFallbackThemeIdentifiers:@[
+            alternateRevision.manifest.themeID,
+            alternateRevision.manifest.themeID,
+        ]
+        disabledFeatureIdentifiers:@[]
+        revisionIdentifiersByThemeIdentifier:fallbackRevisionIdentifiers
+        componentSelectionsByThemeIdentifier:fallbackComponents
+        error:&duplicateFallbackError];
     BOOL savedMix = [selectionStore saveMixSelection:mixSelection error:&error];
     MTThemeMixSelection *loadedMix = [selectionStore
         mixSelectionForBaseThemeIdentifier:revision.manifest.themeID
@@ -6577,6 +6625,12 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
     MTThemeMixSelection *roundTripMix = [MTThemeMixSelection
         selectionWithCanonicalDictionary:mixSelection.canonicalDictionary
         error:&error];
+    NSMutableDictionary<NSString *, id> *legacyMixDictionary =
+        [mixSelection.canonicalDictionary mutableCopy];
+    [legacyMixDictionary removeObjectForKey:@"appIconFallbackThemes"];
+    legacyMixDictionary[@"schemaVersion"] = @1;
+    MTThemeMixSelection *legacyRoundTripMix = [MTThemeMixSelection
+        selectionWithCanonicalDictionary:legacyMixDictionary error:&error];
     MTThemeMixSelection *badgeDisabledMix = [mixSelection
         selectionBySettingFeatureIdentifier:MTThemeFeatureBadges
         enabled:NO error:&error];
@@ -6604,6 +6658,51 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
             }
             mixSelection:badgeDisabledWithoutRememberedSource
             cancellationToken:nil error:&error];
+    MTAssert(thirdPrepared != nil && thirdRevision != nil &&
+             thirdCatalog != nil && fallbackMix != nil &&
+             fallbackGeneration != nil && error == nil &&
+             [fallbackMix.appIconThemeIdentifiersInPriorityOrder
+                 isEqualToArray:@[
+                    revision.manifest.themeID,
+                    alternateRevision.manifest.themeID,
+                    thirdRevision.manifest.themeID,
+                 ]] &&
+             sawBasePriorityIcon && basePriorityIconIsCorrect &&
+             basePriorityLayerIsCorrect &&
+             sawSecondPriorityIcon && secondPriorityIconIsCorrect &&
+             secondPriorityLayerIsCorrect &&
+             sawThirdPriorityIcon && thirdPriorityIconIsCorrect &&
+             thirdPriorityLayerIsCorrect &&
+             fallbackConfiguration.usesOrderedMatchingLayers &&
+             fallbackConfiguration.orderedMatchingLayers.count == 3 &&
+             [fallbackConfiguration.fuzzyBundleIdentifiers
+                 isEqualToArray:@[
+                    @"com.example.Other", @"com.example.Alternate",
+                    @"com.example.Third",
+                 ]] &&
+             [fallbackConfiguration.bundleAliases[
+                 @"shared.fallback.request"]
+                 isEqualToString:@"com.example.Alternate"] &&
+             [fallbackConfiguration.bundleAliases[
+                 @"third.fallback.request"]
+                 isEqualToString:@"com.example.Third"] &&
+             savedFallbackMix && [loadedFallbackMix isEqual:fallbackMix] &&
+             [compactedFallbackMix.appIconFallbackThemeIdentifiers
+                 isEqualToArray:@[thirdRevision.manifest.themeID]] &&
+             disabledFallbackGeneration != nil &&
+             [disabledFallbackMix.referencedThemeIdentifiers
+                 containsObject:alternateRevision.manifest.themeID] &&
+             ![disabledFallbackMix.effectiveThemeIdentifiers
+                 containsObject:alternateRevision.manifest.themeID] &&
+             [disabledFallbackMix.effectiveCanonicalDictionary[
+                 @"appIconFallbackThemes"] count] == 0 &&
+             duplicateFallbackMix == nil && duplicateFallbackError != nil,
+        [NSString stringWithFormat:
+            @"ordered App icon fallbacks must fill uncovered Bundle IDs without overriding earlier themes, merge lookup metadata by priority, persist, compact, and leave disabled Runtime identity base-only (records=%lu config=%@ error=%@ duplicate=%@)",
+            (unsigned long)fallbackGeneration.index.recordCount,
+            fallbackGeneration.descriptor.moduleConfigurations[@"icons.static"],
+            error.localizedDescription ?: @"none",
+            duplicateFallbackError.localizedDescription ?: @"none"]);
     MTAssert(alternatePrepared != nil && alternateRevision != nil &&
              alternateCatalog != nil && mixSelection != nil &&
              mixedGeneration != nil && overlaySourceMix != nil &&
@@ -6638,6 +6737,7 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
              [partiallyRevalidatedMix isEqual:mixSelection] &&
              [appliedMix isEqual:mixSelection] &&
              [roundTripMix isEqual:mixSelection] &&
+             [legacyRoundTripMix isEqual:mixSelection] &&
              [badgeDisabledMix.referencedThemeIdentifiers
                  containsObject:alternateRevision.manifest.themeID] &&
              ![badgeDisabledMix.effectiveThemeIdentifiers
@@ -6722,6 +6822,53 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
              ![restoredMissingSourceMix
                  isFeatureEnabled:MTThemeFeatureBadges],
         @"a temporarily missing source theme must safely disable its feature while retaining the source preference for a later reinstall");
+    NSError *fallbackRepairError = nil;
+    BOOL resetFallbackForRepair = [selectionStore
+        saveMixSelection:fallbackMix error:&fallbackRepairError];
+    NSMutableSet<NSString *> *thirdFeaturesWithoutIcons =
+        [fallbackAvailableFeatures[thirdRevision.manifest.themeID] mutableCopy];
+    [thirdFeaturesWithoutIcons removeObject:MTThemeFeatureAppIcons];
+    NSMutableDictionary<NSString *, NSSet<NSString *> *> *
+        unavailableFallbackFeatures = [fallbackAvailableFeatures mutableCopy];
+    unavailableFallbackFeatures[thirdRevision.manifest.themeID] =
+        [thirdFeaturesWithoutIcons copy];
+    MTThemeMixSelection *repairedFallbackMix = [selectionStore
+        mixSelectionForBaseThemeIdentifier:revision.manifest.themeID
+        revisionIdentifiersByThemeIdentifier:fallbackRevisionIdentifiers
+        componentSelectionsByThemeIdentifier:fallbackComponents
+        availableFeatureIdentifiersByThemeIdentifier:
+            unavailableFallbackFeatures];
+    MTThemeMixSelection *restoredFallbackMix = [selectionStore
+        mixSelectionForBaseThemeIdentifier:revision.manifest.themeID
+        revisionIdentifiersByThemeIdentifier:fallbackRevisionIdentifiers
+        componentSelectionsByThemeIdentifier:fallbackComponents
+        availableFeatureIdentifiersByThemeIdentifier:fallbackAvailableFeatures];
+    MTThemeMixSelection *unrelatedFallbackEdit = [repairedFallbackMix
+        selectionBySettingFeatureIdentifier:MTThemeFeatureBadges
+        enabled:NO error:&fallbackRepairError];
+    BOOL savedUnrelatedFallbackEdit = unrelatedFallbackEdit != nil &&
+        [selectionStore saveMixSelection:unrelatedFallbackEdit
+            preservingStoredAppIconFallbacks:YES
+            error:&fallbackRepairError];
+    MTThemeMixSelection *restoredAfterUnrelatedFallbackEdit = [selectionStore
+        mixSelectionForBaseThemeIdentifier:revision.manifest.themeID
+        revisionIdentifiersByThemeIdentifier:fallbackRevisionIdentifiers
+        componentSelectionsByThemeIdentifier:fallbackComponents
+        availableFeatureIdentifiersByThemeIdentifier:fallbackAvailableFeatures];
+    MTAssert(resetFallbackForRepair && fallbackRepairError == nil &&
+             [repairedFallbackMix.appIconFallbackThemeIdentifiers
+                 isEqualToArray:@[alternateRevision.manifest.themeID]] &&
+             [repairedFallbackMix
+                 isFeatureEnabled:MTThemeFeatureAppIcons] &&
+             [restoredFallbackMix isEqual:fallbackMix] &&
+             savedUnrelatedFallbackEdit &&
+             [restoredAfterUnrelatedFallbackEdit
+                 .appIconFallbackThemeIdentifiers
+                 isEqualToArray:fallbackMix
+                     .appIconFallbackThemeIdentifiers] &&
+             ![restoredAfterUnrelatedFallbackEdit
+                 isFeatureEnabled:MTThemeFeatureBadges],
+        @"an unavailable optional App icon fallback must be skipped and retain its saved priority across unrelated preference writes until its capability returns");
     NSError *unsupportedMixError = nil;
     MTThemeMixSelection *unsupportedMix = [MTThemeMixSelection
         selectionWithBaseThemeIdentifier:revision.manifest.themeID
@@ -6738,6 +6885,7 @@ static void MTTestSnowBoardThemeSuiteImport(void) {
         @"mix preferences must reject display-only capabilities that cannot be switched independently");
     [NSFileManager.defaultManager removeItemAtPath:alternateSourceRoot
                                              error:NULL];
+    [NSFileManager.defaultManager removeItemAtPath:thirdSourceRoot error:NULL];
     [defaults removePersistentDomainForName:defaultsSuite];
 
     [NSFileManager.defaultManager removeItemAtPath:sourceRoot error:NULL];
@@ -7670,10 +7818,9 @@ static void MTTestThemeImportWorkflow(void) {
     MTAssertionCount += MTRunGenerationWriterTests(compiledGeneration);
     MTAssertionCount += MTRunGenerationReaderTests(compiledGeneration);
     MTAssertionCount += MTRunRuntimeStoreTests(compiledGeneration);
-    MTAssertionCount += MTRunRuntimeTargetedRefreshTests();
-    MTAssertionCount += MTRunRuntimeWeakObjectMapSnapshotTests();
     MTAssertionCount += MTRunRuntimeKernelTests();
     MTAssertionCount += MTRunRuntimeProfileTests();
+    MTAssertionCount += MTRunIconServiceRuntimeTests();
     MTAssertionCount += MTRunRuntimeReplacementTests();
     MTAssertionCount += MTRunRuntimeSnapshotResourceTests();
     MTThemeLibraryStore *applyLibraryStore = [[MTThemeLibraryStore alloc]
@@ -8638,12 +8785,11 @@ int main(int argc, const char *argv[]) {
         MTTestLegacyIconOverlayImport();
         MTTestAssetStagingSession();
         MTTestAuditedMetadataFallbacks();
-        MTIconBundlesImportResult *importResult = MTTestDirectoryScanAndImporter(
+        MTTestDirectoryScanAndImporter(
             [NSString stringWithUTF8String:argv[2]], importMetadata);
         MTTestTolerantThemeLayoutImport();
         MTTestClockComponentImport();
         MTTestGlobalIconSurfaceImport();
-        MTTestThemeLibrary(importResult.manifest);
         MTTestFormalThemeLibraryTransaction();
         MTTestThemeLibraryCatalog();
         MTTestSemanticLayoutCompatibilityMatrix();

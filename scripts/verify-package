@@ -78,7 +78,7 @@ package_sileo_depiction=$(control_value SileoDepiction)
 
 [[ "$package_id" == 'com.hmmzzz.marktheme' ]] || fail 'package ID is incorrect'
 [[ "$package_name" == 'MarkTheme' ]] || fail 'package name is incorrect'
-[[ "$package_version" == '0.2.6' ]] || \
+[[ "$package_version" == '0.3.1' ]] || \
   fail 'package version is not the pinned release version'
 [[ "$package_section" == 'Utilities' && \
    "$package_homepage" == 'https://github.com/Hmmzzz/MarkTheme' && \
@@ -101,13 +101,11 @@ rg -F -q \
   'Description: 适用于现代 iOS 越狱环境的模块化主题引擎与管理器。' \
   "$control_file" || fail 'package description is missing or malformed'
 for release_detail in \
-  'MarkTheme 0.2.6 支持导入 SnowBoard / IconBundles 风格主题' \
-  '支持跨主题混搭与功能独立开关' \
-  '可主题化主屏幕与通知中心图标、文件夹、角标、Spotlight、设置、电话' \
-  '照片分享页、系统分享页与状态栏资源' \
-  '提供 conventional rootless 与 RootHide 独立软件包，面向 iOS 17.0 至 18.x' \
-  '更高版本会按实时 ABI 校验结果安全回退' \
-  '身份、ABI 或资源校验失败时自动保留系统原生外观'; do
+  'MarkTheme 0.3.1 支持导入 SnowBoard / IconBundles 风格主题' \
+  '支持跨主题混搭和功能独立开关' \
+  '按提示 Respring 即可应用新外观' \
+  '提供 conventional rootless 与 RootHide 独立软件包，支持 iOS 17.0 至 18.x' \
+  '两个版本不可混装'; do
   rg -F -q "$release_detail" "$control_file" || \
     fail "package release description is incomplete: $release_detail"
 done
@@ -116,10 +114,12 @@ case "$package_arch" in
   iphoneos-arm64e)
     package_scheme=roothide
     runtime_prefix=
+    lifecycle_rootfs_prefix=/rootfs
     ;;
   iphoneos-arm64)
     package_scheme=rootless
     runtime_prefix=/var/jb
+    lifecycle_rootfs_prefix=
     ;;
   *)
     fail "unsupported package architecture: $package_arch"
@@ -157,6 +157,8 @@ helper="$data_root/usr/libexec/marktheme-helper"
 runtime_dir="$data_root/Library/MobileSubstrate/DynamicLibraries"
 runtime="$runtime_dir/MarkThemeRuntime.dylib"
 runtime_filter="$runtime_dir/MarkThemeRuntime.plist"
+icon_service_runtime="$runtime_dir/MarkThemeIconServiceRuntime.dylib"
+icon_service_filter="$runtime_dir/MarkThemeIconServiceRuntime.plist"
 [[ -d "$app" && ! -L "$app" && -f "$binary" && ! -L "$binary" ]] || \
   fail 'MarkTheme application or executable is missing'
 [[ -f "$info" && ! -L "$info" ]] || fail 'application Info.plist is missing'
@@ -177,8 +179,10 @@ done
   fail 'MarkTheme fixed-operation Helper is missing'
 [[ -d "$runtime_dir" && ! -L "$runtime_dir" && \
    -f "$runtime" && ! -L "$runtime" && \
-   -f "$runtime_filter" && ! -L "$runtime_filter" ]] || \
-  fail 'the single product Runtime image or filter is missing'
+   -f "$runtime_filter" && ! -L "$runtime_filter" && \
+   -f "$icon_service_runtime" && ! -L "$icon_service_runtime" && \
+   -f "$icon_service_filter" && ! -L "$icon_service_filter" ]] || \
+  fail 'a product Runtime image or exact filter is missing'
 unexpected_library=$(find "$data_root/Library" -mindepth 1 -maxdepth 1 \
   ! -name MobileSubstrate -print -quit)
 [[ -z "$unexpected_library" ]] || \
@@ -188,24 +192,32 @@ unexpected_substrate=$(find "$data_root/Library/MobileSubstrate" \
 [[ -z "$unexpected_substrate" ]] || \
   fail 'Runtime payload escaped the DynamicLibraries directory'
 unexpected_runtime=$(find "$runtime_dir" -mindepth 1 -maxdepth 1 \
-  ! -name MarkThemeRuntime.dylib ! -name MarkThemeRuntime.plist -print -quit)
+  ! -name MarkThemeRuntime.dylib ! -name MarkThemeRuntime.plist \
+  ! -name MarkThemeIconServiceRuntime.dylib \
+  ! -name MarkThemeIconServiceRuntime.plist -print -quit)
 [[ -z "$unexpected_runtime" ]] || \
-  fail 'more than one Runtime image/filter or an undeclared Runtime file was packaged'
-[[ $(find "$data_root" -type f -name '*.dylib' | wc -l | tr -d ' ') -eq 1 && \
+  fail 'an undeclared Runtime file was packaged'
+[[ $(find "$data_root" -type f -name '*.dylib' | wc -l | tr -d ' ') -eq 2 && \
    $(find "$data_root" -type f -name '*.plist' -path '*DynamicLibraries*' | \
-     wc -l | tr -d ' ') -eq 1 ]] || \
-  fail 'M3-E must package exactly one Runtime dylib and one filter'
+     wc -l | tr -d ' ') -eq 2 ]] || \
+  fail 'the package must contain exactly the display Runtime and IconServices source Runtime pairs'
 if find "$data_root" -type f \( -name '*.x' -o -name '*.xm' \) \
     -print | rg -q .; then
   fail 'Runtime source escaped into the product package'
 fi
 cmp -s "$runtime_filter" "$project_root/runtime/MarkThemeRuntime.plist" || \
   fail 'packaged Runtime filter differs from the generated profile source'
+cmp -s "$icon_service_filter" \
+  "$project_root/iconservice/MarkThemeIconServiceRuntime.plist" || \
+  fail 'packaged IconServices filter differs from its exact source'
 [[ $(plutil -extract Filter.Bundles json -o - "$runtime_filter") == \
-      '["com.apple.Preferences","com.apple.ShareSheet","com.apple.SharingUIService","com.apple.Spotlight","com.apple.mobilephone","com.apple.mobileslideshow","com.apple.sharingd","com.apple.springboard"]' ]] || \
-  fail 'Runtime filter is not the exact generated eight-host allowlist'
+      '["com.apple.Preferences","com.apple.SharingUIService","com.apple.Spotlight","com.apple.mobilephone","com.apple.mobileslideshow","com.apple.sharingd","com.apple.springboard"]' ]] || \
+  fail 'Runtime filter is not the exact generated seven-host allowlist'
+[[ $(plutil -extract Filter.Executables json -o - \
+      "$icon_service_filter") == '["iconservicesagent"]' ]] || \
+  fail 'IconServices source filter is not the exact iconservicesagent allowlist'
 
-for executable in "$binary" "$helper" "$runtime"; do
+for executable in "$binary" "$helper" "$runtime" "$icon_service_runtime"; do
   executable_arches=" $(xcrun lipo -archs "$executable") "
   [[ "$executable_arches" == *' arm64 '* && \
      "$executable_arches" == *' arm64e '* ]] || \
@@ -217,6 +229,7 @@ for executable in "$binary" "$helper" "$runtime"; do
 done
 
 runtime_byte_count=$(stat -f '%z' "$runtime")
+icon_service_runtime_byte_count=$(stat -f '%z' "$icon_service_runtime")
 # Adding one independently ABI-gated SpringBoard adapter can advance the
 # signed arm64e __LINKEDIT segment by one 16 KiB Mach-O page even when its
 # live code is much smaller. Keep the ceiling explicit and page-bounded.
@@ -224,6 +237,8 @@ runtime_byte_count=$(stat -f '%z' "$runtime")
 # and the pre-rounded square morph carrier resolver added a sixth.
 [[ "$runtime_byte_count" -le 2195456 ]] || \
   fail 'the symbolized Runtime image exceeds the M3-E 2 MiB plus one Mach-O page composition budget'
+[[ "$icon_service_runtime_byte_count" -le 1048576 ]] || \
+  fail 'the symbolized IconServices source Runtime exceeds its 1 MiB service budget'
 
 linked_libraries=$(xcrun otool -L "$binary")
 load_commands=$(xcrun otool -l "$binary")
@@ -232,6 +247,9 @@ helper_load_commands=$(xcrun otool -l "$helper")
 runtime_linked_libraries=$(xcrun otool -L "$runtime")
 runtime_load_commands=$(xcrun otool -l "$runtime")
 runtime_install_name=$(xcrun otool -D "$runtime")
+icon_service_linked_libraries=$(xcrun otool -L "$icon_service_runtime")
+icon_service_load_commands=$(xcrun otool -l "$icon_service_runtime")
+icon_service_install_name=$(xcrun otool -D "$icon_service_runtime")
 if [[ "$package_scheme" == roothide ]]; then
   rg -q '@loader_path/\.jbroot/usr/lib/libroothide\.dylib' \
     <<<"$linked_libraries" || \
@@ -245,12 +263,24 @@ if [[ "$package_scheme" == roothide ]]; then
   rg -q '@loader_path/\.jbroot/usr/lib/libsubstrate\.dylib' \
     <<<"$runtime_linked_libraries" || \
     fail 'RootHide Runtime is missing the ElleKit substrate-compatibility link'
+  rg -q '@loader_path/\.jbroot/usr/lib/libroothide\.dylib' \
+    <<<"$icon_service_linked_libraries" || \
+    fail 'RootHide IconServices source library install name is missing'
+  rg -q '@loader_path/\.jbroot/usr/lib/libsubstrate\.dylib' \
+    <<<"$icon_service_linked_libraries" || \
+    fail 'RootHide IconServices source is missing the Hook backend link'
   ! rg -q '@rpath/CydiaSubstrate\.framework/CydiaSubstrate' \
     <<<"$runtime_linked_libraries" || \
     fail 'RootHide Runtime retained the conventional rootless Hook install name'
+  ! rg -q '@rpath/CydiaSubstrate\.framework/CydiaSubstrate' \
+    <<<"$icon_service_linked_libraries" || \
+    fail 'RootHide IconServices source retained the rootless Hook install name'
   rg -q '^@loader_path/\.jbroot/Library/MobileSubstrate/DynamicLibraries/MarkThemeRuntime\.dylib$' \
     <<<"$runtime_install_name" || \
     fail 'RootHide Runtime dylib install name is not bootstrap-relocatable'
+  rg -q '^@loader_path/\.jbroot/Library/MobileSubstrate/DynamicLibraries/MarkThemeIconServiceRuntime\.dylib$' \
+    <<<"$icon_service_install_name" || \
+    fail 'RootHide IconServices source install name is not bootstrap-relocatable'
 else
   ! rg -q 'libroothide\.dylib' <<<"$linked_libraries" || \
     fail 'rootless Manager links the RootHide-only library'
@@ -258,6 +288,8 @@ else
     fail 'rootless Helper links the RootHide-only library'
   ! rg -q 'libroothide\.dylib' <<<"$runtime_linked_libraries" || \
     fail 'rootless Runtime links the RootHide-only library'
+  ! rg -q 'libroothide\.dylib' <<<"$icon_service_linked_libraries" || \
+    fail 'rootless IconServices source links the RootHide-only library'
   rg -q 'path /var/jb/usr/lib ' <<<"$load_commands" || \
     fail 'rootless /var/jb library rpath is missing'
   rg -q 'path @loader_path/\.jbroot/usr/lib ' <<<"$load_commands" || \
@@ -269,6 +301,9 @@ else
   rg -q '^@rpath/MarkThemeRuntime\.dylib$' \
     <<<"$runtime_install_name" || \
     fail 'rootless Runtime dylib install name is not relocatable'
+  rg -q '^@rpath/MarkThemeIconServiceRuntime\.dylib$' \
+    <<<"$icon_service_install_name" || \
+    fail 'rootless IconServices source dylib install name is not relocatable'
   rg -q 'path /var/jb/usr/lib ' <<<"$runtime_load_commands" || \
     fail 'rootless Runtime /var/jb library rpath is missing'
   rg -q 'path @loader_path/\.jbroot/usr/lib ' <<<"$runtime_load_commands" || \
@@ -281,10 +316,27 @@ else
   rg -q '@rpath/CydiaSubstrate\.framework/CydiaSubstrate' \
     <<<"$runtime_linked_libraries" || \
     fail 'rootless Runtime is missing the ElleKit substrate-compatibility link'
+  rg -q 'path /var/jb/usr/lib ' <<<"$icon_service_load_commands" || \
+    fail 'rootless IconServices source /var/jb library rpath is missing'
+  rg -q 'path @loader_path/\.jbroot/usr/lib ' \
+    <<<"$icon_service_load_commands" || \
+    fail 'relocatable IconServices source library rpath is missing'
+  rg -q 'path /var/jb/Library/Frameworks ' \
+    <<<"$icon_service_load_commands" || \
+    fail 'rootless IconServices source Hook framework rpath is missing'
+  rg -q 'path @loader_path/\.jbroot/Library/Frameworks ' \
+    <<<"$icon_service_load_commands" || \
+    fail 'relocatable IconServices source Hook framework rpath is missing'
+  rg -q '@rpath/CydiaSubstrate\.framework/CydiaSubstrate' \
+    <<<"$icon_service_linked_libraries" || \
+    fail 'rootless IconServices source is missing the Hook backend link'
   ! rg -q 'libsubstrate\.dylib' <<<"$runtime_linked_libraries" || \
     fail 'rootless Runtime retained a RootHide Hook install name'
+  ! rg -q 'libsubstrate\.dylib' <<<"$icon_service_linked_libraries" || \
+    fail 'rootless IconServices source retained a RootHide Hook install name'
 fi
-if rg -q 'ElleKit|libhooker|substitute' <<<"$runtime_linked_libraries"; then
+if rg -q 'ElleKit|libhooker|substitute' \
+    <<<"$runtime_linked_libraries $icon_service_linked_libraries"; then
   fail 'an undeclared second Hook backend escaped into the M3-E Runtime'
 fi
 rg -q '/System/Library/Frameworks/UIKit\.framework/UIKit' \
@@ -299,6 +351,16 @@ rg -q '/System/Library/Frameworks/ImageIO\.framework/ImageIO' \
 rg -q '/System/Library/Frameworks/QuartzCore\.framework/QuartzCore' \
   <<<"$runtime_linked_libraries" || \
   fail 'the M5-H Icon Shadow ModuleRuntime is missing QuartzCore linkage'
+rg -q '/System/Library/Frameworks/CoreGraphics\.framework/CoreGraphics' \
+  <<<"$icon_service_linked_libraries" || \
+  fail 'IconServices source is missing CoreGraphics linkage'
+rg -q '/System/Library/Frameworks/ImageIO\.framework/ImageIO' \
+  <<<"$icon_service_linked_libraries" || \
+  fail 'IconServices source is missing ImageIO linkage'
+if rg -q '/System/Library/Frameworks/UIKit\.framework/UIKit' \
+    <<<"$icon_service_linked_libraries"; then
+  fail 'IconServices source must remain independent of UIKit display layers'
+fi
 
 for runtime_arch in arm64 arm64e; do
   runtime_arch_load_commands=$(xcrun otool -l -arch "$runtime_arch" "$runtime")
@@ -313,12 +375,26 @@ for runtime_arch in arm64 arm64e; do
     fail "Runtime $runtime_arch contains an Objective-C +load entry point"
   fi
 done
+for icon_service_arch in arm64 arm64e; do
+  icon_service_arch_load_commands=$(xcrun otool -l \
+    -arch "$icon_service_arch" "$icon_service_runtime")
+  icon_service_init_size=$(awk '
+    $1 == "sectname" && $2 == "__init_offsets" { found = 1; next }
+    found && $1 == "size" { print $2; exit }
+  ' <<<"$icon_service_arch_load_commands")
+  [[ "$icon_service_init_size" == '0x0000000000000004' ]] || \
+    fail "IconServices source $icon_service_arch does not contain exactly one bootstrap constructor"
+  if rg -q '__objc_nlclslist|__objc_nlcatlist' \
+      <<<"$icon_service_arch_load_commands"; then
+    fail "IconServices source $icon_service_arch contains an Objective-C +load entry point"
+  fi
+done
 
 [[ $(plutil -extract CFBundleIdentifier raw -o - "$info") == \
       'com.hmmzzz.marktheme' && \
    $(plutil -extract CFBundleExecutable raw -o - "$info") == 'MarkTheme' && \
-   $(plutil -extract CFBundleShortVersionString raw -o - "$info") == '0.2.6' && \
-   $(plutil -extract CFBundleVersion raw -o - "$info") == '16' && \
+   $(plutil -extract CFBundleShortVersionString raw -o - "$info") == '0.3.1' && \
+   $(plutil -extract CFBundleVersion raw -o - "$info") == '26' && \
    $(plutil -extract MinimumOSVersion raw -o - "$info") == '17.0' ]] || \
   fail 'application identity, version, or minimum iOS is malformed'
 [[ $(plutil -extract CFBundleIconFiles json -o - "$info") == \
@@ -371,9 +447,11 @@ if rg -q \
   fail 'an unnecessary entitlement escaped into the Runtime Helper'
 fi
 
-runtime_entitlements=$(ldid -e "$runtime")
-[[ -z "$runtime_entitlements" ]] || \
-  fail 'the injected Runtime dylib must not carry executable entitlements'
+for injected_runtime in "$runtime" "$icon_service_runtime"; do
+  runtime_entitlements=$(ldid -e "$injected_runtime")
+  [[ -z "$runtime_entitlements" ]] || \
+    fail 'an injected Runtime dylib carries executable entitlements'
+done
 
 if [[ -n "$runtime_prefix" ]]; then
   helper_archive_name="${runtime_prefix#/}/usr/libexec/marktheme-helper"
@@ -394,10 +472,18 @@ runtime_record=$(archive_record "$data_archive" \
   "$runtime_archive_root/MarkThemeRuntime.dylib")
 filter_record=$(archive_record "$data_archive" \
   "$runtime_archive_root/MarkThemeRuntime.plist")
+icon_service_record=$(archive_record "$data_archive" \
+  "$runtime_archive_root/MarkThemeIconServiceRuntime.dylib")
+icon_service_filter_record=$(archive_record "$data_archive" \
+  "$runtime_archive_root/MarkThemeIconServiceRuntime.plist")
 [[ $(awk '{ print $1 }' <<<"$runtime_record") == '-rwxr-xr-x' && \
    "$runtime_record" =~ [[:space:]]root[[:space:]]+wheel[[:space:]] && \
    $(awk '{ print $1 }' <<<"$filter_record") == '-rw-r--r--' && \
-   "$filter_record" =~ [[:space:]]root[[:space:]]+wheel[[:space:]] ]] || \
+   "$filter_record" =~ [[:space:]]root[[:space:]]+wheel[[:space:]] && \
+   $(awk '{ print $1 }' <<<"$icon_service_record") == '-rwxr-xr-x' && \
+   "$icon_service_record" =~ [[:space:]]root[[:space:]]+wheel[[:space:]] && \
+   $(awk '{ print $1 }' <<<"$icon_service_filter_record") == '-rw-r--r--' && \
+   "$icon_service_filter_record" =~ [[:space:]]root[[:space:]]+wheel[[:space:]] ]] || \
   fail 'Runtime image/filter archive ownership or mode is incorrect'
 
 for required_literal in \
@@ -448,10 +534,10 @@ for required_literal in \
   'MTRuntimeHelperClient' \
   'com.hmmzzz.marktheme.runtime-helper-client' \
   'applyGenerationWithIdentifier:error:' \
-  'reloadDesktopWithError:' \
-  'reloadDesktopWithCompletion:' \
+  'requestRespringWithError:' \
+  'requestRespringWithCompletion:' \
   'MTApplyResultViewController' \
-  'marktheme.apply-result.reload' \
+  'marktheme.apply-result.respring' \
   'marktheme.apply-result.later' \
   'apply.result.respring-action' \
   'systemLayoutSizeFittingSize:withHorizontalFittingPriority:verticalFittingPriority:' \
@@ -482,14 +568,14 @@ for required_literal in \
   'prepareDirectoryThemeAtURL:sourceName:cancellationToken:progressHandler:error:' \
   'startDirectoryImportAtURL:sourceName:error:' \
   'loadThemeCatalogWithCancellationToken:error:' \
-  'loadRevisionHistoryForThemeID:cancellationToken:error:' \
-  'switchCurrentRevisionForThemeID:revisionIdentifier:cancellationToken:error:' \
-  'removeRevisionForThemeID:revisionIdentifier:cancellationToken:error:' \
   'recoverAbandonedLibraryOperationsWithError:' \
   'source.payload' \
   '/var/lib/marktheme' \
   '/var/mobile/Library/Application Support/MarkTheme/PublishInbox' \
   '/usr/libexec/marktheme-helper' \
+  'MTDiagnosticsCollector' \
+  'com.hmmzzz.marktheme.diagnostics.collection-request' \
+  'loopback-udp' \
   'resolution.conflict'; do
   rg -a -F -q "$required_literal" "$binary" || \
     fail "foundation contract is not linked into the app: $required_literal"
@@ -519,9 +605,9 @@ for helper_literal in \
   'Insufficient storage is available for the complete Runtime Generation and reserve.' \
   'Unable to repair Runtime store directory ownership or permissions.' \
   'A Runtime store directory path is occupied by an unsafe node.' \
-  'com.hmmzzz.marktheme.runtime-store-changed' \
-  'com.hmmzzz.marktheme.runtime-applied.b%llu.s%llu' \
-  'runtimeDelivery' \
+  'com.hmmzzz.marktheme.icon-service-store-changed' \
+  'com.hmmzzz.marktheme.icon-service-applied.b%llu.s%llu' \
+  'iconServiceDelivery' \
   'reload-desktop' \
   '/usr/bin/sbreload' \
   '/var/lib/marktheme' \
@@ -537,16 +623,17 @@ profile_manifest_digest=$(sed -n \
   fail 'generated Runtime profile digest is malformed'
 generated_profile="$project_root/runtime/RuntimeProfiles.generated.json"
 if rg -n \
-    'osBuild|kern\.osversion|ExpectedImageUUID|[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
+    'osBuild|kern\.osversion|Expected.*UUID|LoadedImageUUID|LC_UUID' \
     "$project_root/runtime" \
+    "$project_root/iconservice" \
     "$project_root/scripts/generate-runtime-profiles" \
     -g '!**/.theos/**' -g '*.{h,m,json}' -g 'generate-runtime-profiles'; then
-  fail 'Runtime compatibility contains an OS build or Mach-O UUID pin'
+  fail 'Runtime or IconServices compatibility contains an OS build or Mach-O UUID pin'
 fi
 profile_count=$(plutil -extract images.0.profiles raw -o - \
   "$generated_profile")
-[[ "$profile_count" == '8' ]] || \
-  fail 'generated Runtime profile count is not the exact eight-host composition'
+[[ "$profile_count" == '7' ]] || \
+  fail 'generated Runtime profile count is not the exact seven-host composition'
 profile_index_for_id() {
   local expected_profile_id=$1
   local profile_index
@@ -568,8 +655,6 @@ preferences_profile_index=$(profile_index_for_id 'preferences.ui-icons') || \
   fail 'generated Runtime profile omits Preferences'
 share_sheet_profile_index=$(profile_index_for_id 'share-sheet.ui-icons') || \
   fail 'generated Runtime profile omits SharingUIService'
-loaded_share_sheet_profile_index=$(profile_index_for_id 'share-sheet.loaded-host.ui-icons') || \
-  fail 'generated Runtime profile omits loaded ShareSheet hosts'
 photos_share_sheet_profile_index=$(profile_index_for_id 'photos.share-sheet.ui-icons') || \
   fail 'generated Runtime profile omits Photos in-process Share Sheet'
 sharingd_profile_index=$(profile_index_for_id 'sharingd.share-sheet.ui-icons') || \
@@ -598,95 +683,61 @@ springboard_profile_index=$(profile_index_for_id 'springboard.icons') || \
       "$generated_profile") == 'com.apple.Preferences' && \
    $(plutil -extract "images.0.profiles.$preferences_profile_index.executable" raw -o - \
       "$generated_profile") == 'Preferences' && \
-   $(plutil -extract "images.0.profiles.$preferences_profile_index.mode" raw -o - \
-      "$generated_profile") == 'processAdapters' && \
    $(plutil -extract "images.0.profiles.$preferences_profile_index.adapters" json -o - \
-      "$generated_profile") == '["preferences.icon-image-cache","preferences.application-icon-image"]' && \
+      "$generated_profile") == \
+        '["preferences.ui-resource-image"]' && \
    $(plutil -extract "images.0.profiles.$preferences_profile_index.modules" json -o - \
-      "$generated_profile") == '["static-icons.snapshot","icon-mask.snapshot","icon-overlay.snapshot","ui-resources.snapshot"]' ]] || \
-  fail 'generated Runtime profile does not select the exact Preferences composition'
-[[ $(plutil -extract "images.0.profiles.$share_sheet_profile_index.profileID" raw -o - \
-      "$generated_profile") == 'share-sheet.ui-icons' && \
-   $(plutil -extract "images.0.profiles.$share_sheet_profile_index.bundleID" raw -o - \
-      "$generated_profile") == 'com.apple.SharingUIService' && \
-   $(plutil -extract "images.0.profiles.$share_sheet_profile_index.executable" raw -o - \
-      "$generated_profile") == 'SharingUIService' && \
-   $(plutil -extract "images.0.profiles.$share_sheet_profile_index.mode" raw -o - \
-      "$generated_profile") == 'processAdapters' && \
-   $(plutil -extract "images.0.profiles.$share_sheet_profile_index.adapters" json -o - \
-      "$generated_profile") == '["share-sheet.activity-image"]' && \
-   $(plutil -extract "images.0.profiles.$share_sheet_profile_index.modules" json -o - \
-      "$generated_profile") == '["static-icons.snapshot","icon-mask.snapshot","icon-overlay.snapshot","ui-resources.snapshot"]' ]] || \
-  fail 'generated Runtime profile does not select the exact SharingUIService composition'
-[[ $(plutil -extract "images.0.profiles.$loaded_share_sheet_profile_index.profileID" raw -o - \
-      "$generated_profile") == 'share-sheet.loaded-host.ui-icons' && \
-   $(plutil -extract "images.0.profiles.$loaded_share_sheet_profile_index.bundleID" raw -o - \
-      "$generated_profile") == 'com.apple.ShareSheet' && \
-   $(plutil -extract "images.0.profiles.$loaded_share_sheet_profile_index.executable" raw -o - \
-      "$generated_profile") == 'ShareSheet' && \
-   $(plutil -extract "images.0.profiles.$loaded_share_sheet_profile_index.mode" raw -o - \
-      "$generated_profile") == 'processAdapters' && \
-   $(plutil -extract "images.0.profiles.$loaded_share_sheet_profile_index.adapters" json -o - \
-      "$generated_profile") == '["share-sheet.activity-image"]' && \
-   $(plutil -extract "images.0.profiles.$loaded_share_sheet_profile_index.modules" json -o - \
-      "$generated_profile") == '["static-icons.snapshot","icon-mask.snapshot","icon-overlay.snapshot","ui-resources.snapshot"]' ]] || \
-  fail 'generated Runtime profile does not select the loaded ShareSheet host composition'
-[[ $(plutil -extract "images.0.profiles.$photos_share_sheet_profile_index.profileID" raw -o - \
-      "$generated_profile") == 'photos.share-sheet.ui-icons' && \
-   $(plutil -extract "images.0.profiles.$photos_share_sheet_profile_index.bundleID" raw -o - \
-      "$generated_profile") == 'com.apple.mobileslideshow' && \
-   $(plutil -extract "images.0.profiles.$photos_share_sheet_profile_index.executable" raw -o - \
-      "$generated_profile") == 'MobileSlideShow' && \
-   $(plutil -extract "images.0.profiles.$photos_share_sheet_profile_index.mode" raw -o - \
-      "$generated_profile") == 'processAdapters' && \
-   $(plutil -extract "images.0.profiles.$photos_share_sheet_profile_index.adapters" json -o - \
-      "$generated_profile") == '["share-sheet.activity-image"]' && \
-   $(plutil -extract "images.0.profiles.$photos_share_sheet_profile_index.modules" json -o - \
-      "$generated_profile") == '["static-icons.snapshot","icon-mask.snapshot","icon-overlay.snapshot","ui-resources.snapshot"]' ]] || \
-  fail 'generated Runtime profile does not select the exact Photos Share composition'
-[[ $(plutil -extract "images.0.profiles.$sharingd_profile_index.profileID" raw -o - \
-      "$generated_profile") == 'sharingd.share-sheet.ui-icons' && \
-   $(plutil -extract "images.0.profiles.$sharingd_profile_index.bundleID" raw -o - \
-      "$generated_profile") == 'com.apple.sharingd' && \
-   $(plutil -extract "images.0.profiles.$sharingd_profile_index.executable" raw -o - \
-      "$generated_profile") == 'sharingd' && \
-   $(plutil -extract "images.0.profiles.$sharingd_profile_index.mode" raw -o - \
-      "$generated_profile") == 'processAdapters' && \
-   $(plutil -extract "images.0.profiles.$sharingd_profile_index.adapters" json -o - \
-      "$generated_profile") == '["share-sheet.activity-image"]' && \
-   $(plutil -extract "images.0.profiles.$sharingd_profile_index.modules" json -o - \
-      "$generated_profile") == '["static-icons.snapshot","icon-mask.snapshot","icon-overlay.snapshot","ui-resources.snapshot"]' ]] || \
-  fail 'generated Runtime profile does not select the exact sharingd Share composition'
+      "$generated_profile") == '["ui-resources.snapshot"]' ]] || \
+  fail 'generated Runtime profile does not select the Preferences source'
+
+for share_profile_contract in \
+  "$share_sheet_profile_index|share-sheet.ui-icons|com.apple.SharingUIService|SharingUIService" \
+  "$photos_share_sheet_profile_index|photos.share-sheet.ui-icons|com.apple.mobileslideshow|MobileSlideShow" \
+  "$sharingd_profile_index|sharingd.share-sheet.ui-icons|com.apple.sharingd|sharingd"; do
+  IFS='|' read -r share_index share_id share_bundle share_executable \
+    <<<"$share_profile_contract"
+  [[ $(plutil -extract "images.0.profiles.$share_index.profileID" raw -o - \
+        "$generated_profile") == "$share_id" && \
+     $(plutil -extract "images.0.profiles.$share_index.bundleID" raw -o - \
+        "$generated_profile") == "$share_bundle" && \
+     $(plutil -extract "images.0.profiles.$share_index.executable" raw -o - \
+        "$generated_profile") == "$share_executable" && \
+     $(plutil -extract "images.0.profiles.$share_index.adapters" json -o - \
+        "$generated_profile") == \
+          '["share-sheet.activity-glyph"]' && \
+     $(plutil -extract "images.0.profiles.$share_index.modules" json -o - \
+        "$generated_profile") == '["ui-resources.snapshot"]' ]] || \
+    fail "generated Runtime profile does not select the Share glyph source: $share_id"
+done
+
 [[ $(plutil -extract "images.0.profiles.$spotlight_profile_index.profileID" raw -o - \
       "$generated_profile") == 'spotlight.application-icons' && \
    $(plutil -extract "images.0.profiles.$spotlight_profile_index.bundleID" raw -o - \
       "$generated_profile") == 'com.apple.Spotlight' && \
    $(plutil -extract "images.0.profiles.$spotlight_profile_index.executable" raw -o - \
       "$generated_profile") == 'Spotlight' && \
-   $(plutil -extract "images.0.profiles.$spotlight_profile_index.mode" raw -o - \
-      "$generated_profile") == 'processAdapters' && \
    $(plutil -extract "images.0.profiles.$spotlight_profile_index.adapters" json -o - \
       "$generated_profile") == \
-        '["spotlight.icon-image-cache","springboard.clock-image-set","spotlight.search-ui-app-image"]' && \
+        '["springboard-home.clock-icon-sources","calendar-ui-kit.dynamic-icon-source","spotlight.calendar-appearance"]' && \
    $(plutil -extract "images.0.profiles.$spotlight_profile_index.modules" json -o - \
       "$generated_profile") == \
         '["static-icons.snapshot","calendar-icons.composite","clock-icons.snapshot","icon-mask.snapshot","icon-overlay.snapshot"]' ]] || \
-  fail 'generated Runtime profile does not select the exact Spotlight composition'
+  fail 'generated Runtime profile does not select the Spotlight sources'
+
 [[ $(plutil -extract "images.0.profiles.$springboard_profile_index.profileID" raw -o - \
       "$generated_profile") == 'springboard.icons' && \
    $(plutil -extract "images.0.profiles.$springboard_profile_index.bundleID" raw -o - \
       "$generated_profile") == 'com.apple.springboard' && \
    $(plutil -extract "images.0.profiles.$springboard_profile_index.executable" raw -o - \
       "$generated_profile") == 'SpringBoard' && \
-   $(plutil -extract "images.0.profiles.$springboard_profile_index.mode" raw -o - \
-      "$generated_profile") == 'processAdapters' && \
    $(plutil -extract "images.0.profiles.$springboard_profile_index.adapters" json -o - \
       "$generated_profile") == \
-        '["springboard.icon-image-cache","springboard.notification-icon","springboard.clock-image-set","springboard.folder-image","springboard.badge-background","springboard.icon-shadow","springboard.statusbar-signal-image"]' && \
+        '["springboard.notification-icon-source","springboard.icon-morph-carrier","calendar-ui-kit.dynamic-icon-source","springboard.calendar-appearance","springboard-home.clock-icon-sources","springboard-home.folder-icon-source","springboard-home.badge-source","springboard-home.icon-shadow-carrier","springboard.statusbar-signal-image"]' && \
    $(plutil -extract "images.0.profiles.$springboard_profile_index.modules" json -o - \
       "$generated_profile") == \
         '["static-icons.snapshot","calendar-icons.composite","clock-icons.snapshot","icon-mask.snapshot","icon-overlay.snapshot","folder-icons.snapshot","badges.snapshot","icon-shadow.snapshot","statusbar.snapshot"]' ]] || \
-  fail 'generated Runtime profile does not select the exact SpringBoard composition'
+  fail 'generated Runtime profile does not select the SpringBoard sources'
+
 for runtime_literal in \
   'MTRuntimeKernel' \
   'MTRuntimeSnapshot' \
@@ -694,66 +745,27 @@ for runtime_literal in \
   'MTRuntimeProfile' \
   'MTGenerationReader' \
   'MTRuntimeState' \
-  'loadSnapshotWithError:' \
-  'resourceForCanonicalResourceKey:error:' \
-  'stateByReadingRuntimeRootURL:ownershipProfile:error:' \
-  'com.hmmzzz.marktheme.runtime-reload' \
-  'com.hmmzzz.marktheme.runtime-store-changed' \
-  'com.hmmzzz.marktheme.runtime-applied.b%llu.s%llu' \
-  'com.hmmzzz.marktheme.runtime-snapshot-loader' \
+  'com.hmmzzz.marktheme.diagnostics.collection-request' \
+  'loopback-udp' \
   'runtime.system-ui' \
   'mobilephone.dialer' \
-  'com.apple.mobilephone' \
-  'MobilePhone' \
   'mobilephone.dialer-buttons' \
   'dialer.snapshot' \
-  'PHHandsetDialerNumberPadButton' \
-  'TPNumberPadButton' \
-  'PHHandsetDialerView' \
-  'PHBottomBarButton' \
-  'numberPadButtonsForCharacters:' \
-  'reloadImagesForCurrentCharacter' \
-  'newCallButton' \
-  'setHighlighted:' \
-  'MTRuntimeDialerButtonAdapterObservation' \
-  'MTRuntimeDialerSnapshotObservation' \
-  'com.hmmzzz.marktheme.dialer-preparation' \
-  'dialer/%@/%lu' \
-  '/Applications/MobilePhone.app/MobilePhone' \
-  '/System/Library/PrivateFrameworks/TelephonyUI.framework/TelephonyUI' \
   'preferences.ui-icons' \
-  'com.apple.Preferences' \
-  'Preferences' \
-  'preferences.icon-image-cache' \
-  'preferences.application-icon-image' \
-  'static-icons.snapshot' \
-  'icon-mask.snapshot' \
-  'icon-overlay.snapshot' \
-  'ui-resources.snapshot' \
+  'preferences.ui-resource-image' \
   'share-sheet.ui-icons' \
-  'com.apple.SharingUIService' \
-  'SharingUIService' \
-  'share-sheet.loaded-host.ui-icons' \
-  'com.apple.ShareSheet' \
-  '/System/Library/PrivateFrameworks/ShareSheet.framework/ShareSheet' \
-  'photos.share-sheet.ui-icons' \
-  'com.apple.mobileslideshow' \
-  'MobileSlideShow' \
-  'share-sheet.activity-image' \
+  'share-sheet.activity-glyph' \
   'spotlight.application-icons' \
-  'com.apple.Spotlight' \
-  'Spotlight' \
-  'spotlight.search-ui-app-image' \
+  'calendar-ui-kit.dynamic-icon-source' \
+  'spotlight.calendar-appearance' \
   'springboard.icons' \
-  'com.apple.springboard' \
-  'SpringBoard' \
-  'M3-E runtime started profile=%{public}@ process=%{public}@ mode=%{public}lu' \
-  'springboard.icon-image-cache' \
-  'springboard.notification-icon' \
-  'springboard.clock-image-set' \
-  'springboard.folder-image' \
-  'springboard.badge-background' \
-  'springboard.icon-shadow' \
+  'springboard.notification-icon-source' \
+  'springboard.icon-morph-carrier' \
+  'springboard.calendar-appearance' \
+  'springboard-home.clock-icon-sources' \
+  'springboard-home.folder-icon-source' \
+  'springboard-home.badge-source' \
+  'springboard-home.icon-shadow-carrier' \
   'springboard.statusbar-signal-image' \
   'static-icons.snapshot' \
   'calendar-icons.composite' \
@@ -764,171 +776,103 @@ for runtime_literal in \
   'badges.snapshot' \
   'icon-shadow.snapshot' \
   'statusbar.snapshot' \
-  'com.apple.mobilecal' \
-  'com.apple.mobiletimer' \
-  'MTRuntimeCalendarIconRendererObservation' \
-  'MTRuntimeBadgeBackgroundImageAdapterObservation' \
-  'MTRuntimeBadgeSnapshotObservation' \
-  'MTBadgeSnapshotContext' \
-  'com.hmmzzz.marktheme.badge-preparation' \
-  'badge-background/%@/%lu' \
-  'contextForTraitCollection:' \
-  'stockImageForBackgroundView:originalImage:previousReplacement:didReplace:' \
-  'MTRuntimeIconShadowViewAdapterObservation' \
-  'MTRuntimeIconShadowSnapshotObservation' \
-  'MTIconShadowSnapshotContext' \
-  'com.hmmzzz.marktheme.icon-shadow-preparation' \
-  '_configureIconImageView:' \
-  'setIconImageInfo:' \
-  '_destroyIconImageView' \
-  'iPhoneShadow' \
-  'iPadShadow' \
-  'iPadProShadow' \
-  'STUIStatusBarSignalView' \
-  'STUIStatusBarWifiSignalView' \
-  'STUIStatusBarCellularSignalView' \
-  '_UIStatusBarSignalView' \
-  '_UIStatusBarWifiSignalView' \
-  '_UIStatusBarCellularSignalView' \
-  'setNumberOfActiveBars:' \
-  'applyStyleAttributes:' \
-  'numberOfActiveBars' \
-  'activeColor' \
-  'MTRuntimeStatusBarSignalImageAdapterObservation' \
-  'MTRuntimeStatusBarSnapshotObservation' \
-  'com.hmmzzz.marktheme.statusbar-preparation' \
-  'statusbar/%@/%lu' \
-  '/System/Library/PrivateFrameworks/SystemStatusUI.framework/SystemStatusUI' \
-  '/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore' \
-  'loadImagePreservingSourceDimensionsForGeneration:resource:error:' \
-  'UIGraphicsImageRenderer' \
-  'SBHIconImageCache' \
-  'realImageForIcon:options:' \
-  '@32@0:8@16Q24' \
-  'cacheImageForIcon:options:completionHandler:' \
-  'v40@0:8@16Q24@?32' \
-  'SBHIconImageVariantCache' \
-  '_variantImageForIcon:' \
-  '@24@0:8@16' \
-  'purgeCachedImagesForIcons:' \
-  'notifyObserversOfUpdateForIcon:' \
-  'v24@0:8@16' \
-  'SBIcon' \
-  'applicationBundleID' \
-  '@16@0:8' \
-  '/System/Library/PrivateFrameworks/SpringBoardHome.framework/SpringBoardHome' \
-  'MTRuntimeIconImageCacheAdapterObservation' \
+  'ui-resources.snapshot' \
   'NCNotificationRequestContentProvider' \
-  'notificationRequest' \
-  'NCNotificationRequest' \
-  'bulletin' \
-  'BBBulletin' \
-  'sectionID' \
-  '/System/Library/PrivateFrameworks/UserNotificationsUIKit.framework/UserNotificationsUIKit' \
-  'MTRuntimeNotificationIconAdapterObservation' \
-  'PKIconImageCache' \
-  'imageForKey:' \
-  'PSListController' \
-  'reloadSpecifiers' \
-  'v16@0:8' \
-  '/System/Library/PrivateFrameworks/Preferences.framework/Preferences' \
-  'MTRuntimePreferencesIconImageCacheAdapterObservation' \
-  'MTRuntimePreferencesApplicationIconAdapterObservation' \
-  'PSTableCell' \
-  'getLazyIcon' \
-  'getLazyIconID' \
-  'MTRuntimeUIResourceSnapshotObservation' \
-  'MTUIResourceSnapshotAttachedViewControllers' \
-  'resolutionForPreferencesIconName:scale:error:' \
-  'resolutionForShareActivityName:scale:error:' \
-  'MTUIResourceSnapshotResolveShareActivity' \
-  'UIActivity' \
-  'SUIHostActivityProxy' \
-  'SFUIActivityImageProvider' \
-  'UIImage' \
-  '_activityImage' \
-  '_activitySettingsImage' \
-  '_activityImageForApplicationBundleIdentifier:' \
-  '_activitySettingsImageForApplicationBundleIdentifier:' \
-  '@24@0:8@16' \
-  '_handleIconImage:bundleIdentifier:activityCategory:contentSizeCategory:placeholder:' \
-  'v52@0:8@16@24q32@40B48' \
-  '_applicationIconImageForBundleIdentifier:format:scale:' \
-  '@36@0:8@16i24d28' \
-  'activityConfiguration' \
-  'activityClassName' \
-  'MTShareSheetApplicationBundleIdentity' \
-  'activityType' \
-  'fallbackActivityType' \
-  'com.apple.UIKit.activity.OpenWithApp-' \
-  'activityImage' \
-  'MTRuntimeABIReportRecordSample' \
-  'LSPlugInKitProxy' \
-  'pluginKitProxyForIdentifier:' \
-  'MTShareSheetApplicationBundleIdentityForActivityIdentity' \
-  'UIMailActivity' \
-  'UIMessageActivity' \
-  'com.apple.mobilemail' \
-  'com.apple.MobileSMS' \
-  'MTShareSheetProviderImplementationMatchesExpectedImage' \
-  '/System/Library/PrivateFrameworks/ShareSheet.framework/ShareSheet' \
-  '/System/Library/PrivateFrameworks/SharingUI.framework/SharingUI' \
-  'MTRuntimeShareSheetActivityImageAdapterObservation' \
-  'SearchUIAppIconImage' \
+  '_appBundleIdentifer' \
+  'MTRuntimeNotificationIconSourceAdapterObservation' \
+  'MTNotificationIconSnapshotResolve' \
+  'initWithSnapshotProvider:dynamicCategoryPolicy:' \
+  'CUIKDefaultIconGenerator' \
+  'iconImageWithDateComponents:calendar:format:size:scale:' \
+  'MTRuntimeCalendarUIKitSourceAdapterObservation' \
+  'SBHCalendarApplicationIcon' \
+  'generateIconImageWithInfo:' \
+  'unmaskedIconImageWithInfo:' \
+  'MTRuntimeCalendarApplicationIconAdapterObservation' \
   'SearchUICalendarIconImage' \
   'loadImageWithScale:isDarkStyle:' \
-  '@28@0:8d16B24' \
   'invalidateAppIcon' \
-  '/System/Library/PrivateFrameworks/SearchUI.framework/SearchUI' \
-  'MTRuntimeSearchUIAppIconImageAdapterObservation' \
-  'spotlight.icon-image-cache' \
+  'MTRuntimeSearchUICalendarIconAdapterObservation' \
+  'UIActivity' \
+  'SUIHostActivityProxy' \
+  'SFUIImageProvider' \
+  'SFUIActivityImageProvider' \
+  'SFUIActivityImageRequest' \
+  'performImageRequest:' \
+  'deliverImage:identifier:placeholder:error:' \
+  '_activityImageForApplicationBundleIdentifier:' \
+  'MTShareSheetApplicationBundleIdentityForActivityIdentity' \
+  'MTRuntimeShareSheetActivityGlyphAdapterObservation' \
+  'PKIconImageCache' \
+  'imageForKey:' \
+  'MTRuntimePreferencesUIResourceImageAdapterObservation' \
+  'MTUIResourceSnapshotResolveShareActivity' \
   'SBHClockApplicationIconImageView' \
   'SBHClockHandsImageSet' \
-  'imageSetForMetrics:' \
-  'contentsImage' \
-  'squareContentsImage' \
-  'applyMetrics:' \
-  'updateImageAnimated:' \
-  'MTRuntimeClockImageSetAdapterObservation' \
+  'iconImageWithImageInfo:includingMask:' \
+  'makeImageSetForMetrics:' \
+  'MTRuntimeClockNativeSourceAdapterObservation' \
   'SBFolderIconImageView' \
-  'backgroundView' \
-  'setBackgroundView:' \
-  'MTRuntimeFolderBackgroundImageAdapterObservation' \
-  'MTRuntimeFolderIconSnapshotObservation' \
+  'MTRuntimeFolderNativeSourceAdapterObservation' \
+  'MTRuntimeBadgeNativeSourceAdapterObservation' \
+  'MTRuntimeIconShadowCarrierAdapterObservation' \
+  'MTRuntimeStatusBarSignalImageAdapterObservation' \
   'MTRuntimeStaticIconSnapshotObservation' \
-  'MTRuntimeTargetedRefreshTracker' \
-  'MTIconImageCacheAdapterCaptureRefreshSnapshot' \
-  'MTIconImageCacheAdapterRefreshSnapshot' \
-  'MTRuntimeRefreshConfiguredAdapters' \
   'MTStaticIconSnapshotPrepare' \
-  'MTStaticIconSnapshotPrewarmBundleIdentifiers' \
-  'MTStaticIconSnapshotResolve' \
-  'MTStaticIconSnapshotResolveSystemSurface' \
-  'MTStaticIconSnapshotResolveSecondarySurfaceImage' \
-  'MTStaticIconVisualProofExpectedPointSize' \
-  'MTStaticIconVisualProofExpectedScale' \
-  'MTStaticIconShareSheetMoreExpectedPointSize' \
-  'MTStaticIconShareSheetImageContractIsSupported' \
+  'MTStaticIconSnapshotResolveClockSource' \
+  'MTStaticIconSnapshotResolveCalendarSource' \
+  'MTApplicationIconSnapshotAffectsBundleIdentifier' \
   'MTStaticIconSystemSurfaceImageContractIsSupported' \
-  'MTStaticIconSnapshotResolver' \
-  'resolutionForBundleIdentifier:scale:error:' \
-  'MTRuntimeAsyncObjectCache' \
+  'MTIconMaskSnapshotResolveSystemSurface' \
+  'MTIconOverlaySnapshotResolveSystemSurface' \
   'MTRuntimeObjectCache' \
   'MTRuntimePublishedImageLoader' \
-  'verifiedAssetDataForResource:maximumByteCount:error:' \
-  'com.hmmzzz.marktheme.runtime-published-image-loader' \
-  'com.hmmzzz.marktheme.static-icon-snapshot-module' \
-  'com.hmmzzz.marktheme.static-icon-decode' \
-  '%lux%lu@%lu' \
   'MTRuntimeResultByApplyingReplacementResolver' \
-  'com.hmmzzz.marktheme' \
-  'UIImage' \
+  'com.apple.mobilecal' \
+  'com.apple.mobiletimer' \
   'active.json' \
   'MTGIDX' \
   '/var/lib/marktheme' \
   "$profile_manifest_digest"; do
   rg -a -F -q "$runtime_literal" "$runtime" || \
-    fail "read-only Runtime contract is not linked: $runtime_literal"
+    fail "display Runtime contract is not linked: $runtime_literal"
+done
+
+for icon_service_literal in \
+  'iconservicesagent' \
+  'MTIconServiceConfiguredRuntimeMode' \
+  'ISGenerationRequest' \
+  'generateImageReturningRecordIdentifiers:' \
+  'ISBundleIdentifierIcon' \
+  'ISImageDescriptor' \
+  'IFCacheImage' \
+  'IFImage' \
+  'copyReplacementForBundleIdentifier:pointSize:scale:pixelWidth:pixelHeight:stockImageDigest:stockCGImage:error:' \
+  'IconCacheService' \
+  'initWithServiceName:' \
+  'ISMutableIconCache' \
+  'ClearCacheOperation' \
+  'scheduleCacheOperation:' \
+  'native-whole-cache-cleared' \
+  'native-clear-completion-timeout' \
+  'invalidateWholeStoreWithCompletion:' \
+  'initWithSnapshotProvider:dynamicCategoryPolicy:' \
+  'generationIdentifier' \
+  'com.hmmzzz.marktheme.icon-service-store-changed' \
+  'com.hmmzzz.marktheme.icon-service-applied.b%llu.s%llu' \
+  'com.apple.mobilecal' \
+  'com.apple.mobiletimer' \
+  'icons.calendar' \
+  'icons.clock' \
+  'MTIconMaskCreateImage' \
+  'MTIconOverlayCreateImage' \
+  'MTRuntimePublishedImageLoader' \
+  'MTStaticIconSnapshotResolver' \
+  'MTGenerationReader' \
+  'active.json' \
+  '/var/lib/marktheme'; do
+  rg -a -F -q "$icon_service_literal" "$icon_service_runtime" || \
+    fail "IconServices source contract is not linked: $icon_service_literal"
 done
 
 for forbidden_runtime_literal in \
@@ -948,9 +892,46 @@ for forbidden_runtime_literal in \
   'MTApplyResultViewController' \
   'MTThemeLibraryViewController' \
   'MTSettingsViewController' \
-  'MTImportViewController'; do
+  'MTImportViewController' \
+  'MTRuntimeTargetedRefreshTracker' \
+  'MTIconImageCacheAdapter' \
+  'MTNotificationIconAdapter' \
+  'MTPreferencesApplicationIconAdapter' \
+  'MTShareSheetActivityImageAdapter' \
+  'MTSearchUIAppIconImageAdapter' \
+  'SBApplicationIcon' \
+  'PSTableCell' \
+  'SearchUIAppIconImage' \
+  '_applicationIconImageForBundleIdentifier:format:scale:' \
+  '_handleIconImage:bundleIdentifier:activityCategory:contentSizeCategory:placeholder:'; do
   if rg -a -F -q "$forbidden_runtime_literal" "$runtime"; then
     fail "control-plane or UI code escaped into Runtime: $forbidden_runtime_literal"
+  fi
+done
+
+for forbidden_icon_service_literal in \
+  '21D61' \
+  'kern.osversion' \
+  '8B774C6D-D367-30BA-B31B-6F7A7344EDFD' \
+  '5FA9A56A-94F2-39B1-8468-DD04574428E3' \
+  'UIApplication' \
+  'UIViewController' \
+  'SBApplicationIcon' \
+  'SBHIconImageCache' \
+  'SearchUIAppIconImage' \
+  'PSTableCell' \
+  'lsregister' \
+  'uicache' \
+  '.isdata' \
+  'MTIconServiceStoreIndex' \
+  'performBlock:' \
+  'enumerateValuesForUUID:bock:' \
+  'removeValueForUUID:passingTest:' \
+  'recordGeneratedContext' \
+  'removeItemAtPath:'; do
+  if rg -a -F -q "$forbidden_icon_service_literal" \
+      "$icon_service_runtime"; then
+    fail "display-layer or raw-file behavior escaped into IconServices source: $forbidden_icon_service_literal"
   fi
 done
 
@@ -959,7 +940,7 @@ if rg -a -F -q 'MTRuntimeKernel' "$binary" "$helper"; then
 fi
 
 if rg -a -F -q 'MTRuntimeStoreTestingReachCheckpoint' \
-    "$binary" "$helper" "$runtime"; then
+    "$binary" "$helper" "$runtime" "$icon_service_runtime"; then
   fail 'test-only Runtime Store checkpoints escaped into a product executable'
 fi
 
@@ -1003,6 +984,9 @@ for lifecycle_script in "$prerm" "$postrm"; do
   rg -F -x -q "$expected_prefix_line" "$lifecycle_script" || \
     fail 'a lifecycle package prefix does not match the package scheme'
 done
+expected_rootfs_prefix_line="rootfs_prefix='$lifecycle_rootfs_prefix'"
+rg -F -x -q "$expected_rootfs_prefix_line" "$postrm" || \
+  fail 'the postrm rootfs prefix does not match the package scheme'
 for lifecycle_literal in \
   'runtime_helper="${package_prefix}/usr/libexec/marktheme-helper"' \
   '"$runtime_helper" disable --json >/dev/null 2>&1 || true' \
@@ -1012,9 +996,9 @@ for lifecycle_literal in \
     fail "prerm lifecycle contract is missing: $lifecycle_literal"
 done
 for lifecycle_literal in \
-  "manager_data_root='/var/mobile/Library/Application Support/MarkTheme'" \
+  'manager_data_root="${rootfs_prefix}/var/mobile/Library/Application Support/MarkTheme"' \
   'runtime_store_root="${package_prefix}/var/lib/marktheme"' \
-  "preferences_file='/var/mobile/Library/Preferences/com.hmmzzz.marktheme.plist'" \
+  'preferences_file="${rootfs_prefix}/var/mobile/Library/Preferences/com.hmmzzz.marktheme.plist"' \
   'remove|purge|disappear)' \
   'upgrade|failed-upgrade|abort-install|abort-upgrade)' \
   'validate_exact_tree "$manager_data_root"' \
@@ -1031,8 +1015,8 @@ if rg -n \
     "$prerm" "$postrm"; then
   fail 'MarkTheme package lifecycle performs a restart or physical-path action'
 fi
-if rg -F -q '@MARKTHEME_PACKAGE_PREFIX@' "$verify_dir/control"; then
-  fail 'an unrendered package-prefix placeholder escaped into package control data'
+if rg -q '@MARKTHEME_(PACKAGE|ROOTFS)_PREFIX@' "$verify_dir/control"; then
+  fail 'an unrendered lifecycle path placeholder escaped into package control data'
 fi
 
 if rg -a -n '/private/preboot/' "$verify_dir/control" "$verify_dir/data" >/dev/null; then
@@ -1050,6 +1034,8 @@ printf '  version:       %s\n' "$package_version"
 printf '  architecture:  %s\n' "$package_arch"
 printf '  Mach-O slices: arm64 arm64e\n'
 printf '  minimum iOS:   17.0\n'
-printf '  Runtime:       one %s-byte original-first image; process/loaded-ShareSheet-scoped, live-ABI-probed SpringBoard/Preferences/SharingUIService/Photos/Spotlight/MobilePhone/sharingd profiles\n' \
+printf '  display:       %s-byte immutable startup-snapshot Runtime for exact SpringBoard/Preferences/Share/Spotlight/MobilePhone hosts\n' \
   "$runtime_byte_count"
-printf '  payload:       Manager + short-lived root Helper + one Runtime; no daemon\n'
+printf '  icon source:   %s-byte exact iconservicesagent source with verified native whole-cache clearing\n' \
+  "$icon_service_runtime_byte_count"
+printf '  payload:       Manager + short-lived root Helper + two scoped Runtimes; no daemon\n'

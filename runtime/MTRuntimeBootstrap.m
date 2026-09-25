@@ -2,11 +2,7 @@
 
 #import <os/log.h>
 
-#include <stdint.h>
-#include <stdatomic.h>
-
 #import "MTRuntimeABIReport.h"
-#import "MTRuntimeInvalidation.h"
 #import "MTRuntimeKernel.h"
 #import "MTRuntimeProfile.h"
 #import "MTRuntimeSnapshot.h"
@@ -16,7 +12,6 @@
 
 static NSString *const MTRuntimeImageID = @"runtime.system-ui";
 static MTRuntimeKernel *MTRuntimeKernelInstance;
-static atomic_bool MTRuntimeAdaptersInstalled;
 
 static os_log_t MTRuntimeLog(void) {
     static os_log_t log;
@@ -50,8 +45,7 @@ static void MTRuntimeBootstrapEntry(void) {
             if (error != nil) MTRuntimeLogBootstrapFailure(@"profile", error);
             return;
         }
-        if (profile.mode != MTRuntimeProfileModeKernelOnly &&
-            profile.mode != MTRuntimeProfileModeProcessAdapters) return;
+        if (profile.mode != MTRuntimeProfileModeProcessAdapters) return;
 
         MTRuntimeSnapshotLoader *loader =
             [MTRuntimeSnapshotLoader defaultLoaderWithError:&error];
@@ -59,66 +53,21 @@ static void MTRuntimeBootstrapEntry(void) {
             MTRuntimeLogBootstrapFailure(@"loader", error);
             return;
         }
-        __block uint64_t lastRefreshSequence = UINT64_MAX;
-        __block __weak MTRuntimeKernel *weakKernel = nil;
-        BOOL desktopProfile =
-            [profile.profileID isEqualToString:@"springboard.icons"];
-        MTRuntimeKernel *kernel = [[MTRuntimeKernel alloc]
-            initWithLoader:loader
-            notificationName:MTRuntimeInvalidationNotificationName
-            reloadHandler:^(MTRuntimeReloadDisposition disposition,
-                            MTRuntimeSnapshot *snapshot,
-                            NSError *reloadError) {
-                if (disposition ==
-                    MTRuntimeReloadDispositionRetainedAfterFailure) {
-                    MTRuntimeLogBootstrapFailure(@"reload", reloadError);
-                    return;
-                }
-                MTRuntimeABIReportRecordRuntimeSnapshot(
-                    snapshot.state.sequence,
-                    snapshot.state.isRuntimeEnabled,
-                    snapshot.isReady,
-                    snapshot.state.activeGenerationIdentifier);
-                if (lastRefreshSequence != snapshot.state.sequence) {
-                    lastRefreshSequence = snapshot.state.sequence;
-                    MTRuntimeKernel *strongKernel = weakKernel;
-                    if (strongKernel != nil) {
-                        MTRuntimeRefreshConfiguredAdapters(
-                            profile, strongKernel, snapshot);
-                    }
-                }
-                if (desktopProfile && atomic_load_explicit(
-                        &MTRuntimeAdaptersInstalled,
-                        memory_order_acquire)) {
-                    (void)MTRuntimePostAcknowledgement(
-                        snapshot.state.sequence);
-                }
-                os_log_with_type(MTRuntimeLog(), OS_LOG_TYPE_DEFAULT,
-                    "M3-E snapshot %{public}lu sequence=%{public}llu "
-                    "profile=%{public}@",
-                    (unsigned long)disposition,
-                    (unsigned long long)snapshot.state.sequence,
-                    profile.profileID);
-            }];
-        weakKernel = kernel;
-        MTRuntimeKernelInstance = kernel;
-        if (![kernel startSynchronouslyWithError:&error]) {
-            // Keep the running Kernel on its canonical stock snapshot. A later
-            // store notification can recover without loading any Hook against
-            // a partially validated Generation.
+        MTRuntimeSnapshot *snapshot = [loader loadSnapshotWithError:&error];
+        if (snapshot == nil) {
             MTRuntimeLogBootstrapFailure(@"initial-snapshot", error);
+            snapshot = MTRuntimeSnapshot.stockSnapshot;
         }
-        MTRuntimeSnapshot *initialSnapshot = kernel.currentSnapshot;
+        MTRuntimeKernel *kernel = [[MTRuntimeKernel alloc]
+            initWithSnapshot:snapshot];
+        MTRuntimeKernelInstance = kernel;
         MTRuntimeABIReportRecordRuntimeSnapshot(
-            initialSnapshot.state.sequence,
-            initialSnapshot.state.isRuntimeEnabled,
-            initialSnapshot.isReady,
-            initialSnapshot.state.activeGenerationIdentifier);
+            snapshot.state.sequence,
+            snapshot.state.isRuntimeEnabled,
+            snapshot.isReady,
+            snapshot.state.activeGenerationIdentifier);
         if (!MTRuntimeInstallConfiguredAdapters(profile, kernel, &error)) {
             MTRuntimeLogBootstrapFailure(@"adapters", error);
-        } else {
-            atomic_store_explicit(&MTRuntimeAdaptersInstalled, true,
-                                  memory_order_release);
         }
         os_log_with_type(MTRuntimeLog(), OS_LOG_TYPE_DEFAULT,
             "M3-E runtime started profile=%{public}@ process=%{public}@ "

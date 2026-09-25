@@ -2,7 +2,6 @@
 
 @class MTRuntimeProfile;
 @class MTRuntimeKernel;
-@class MTRuntimeSnapshot;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -22,13 +21,5 @@ FOUNDATION_EXPORT BOOL MTRuntimeInstallConfiguredAdapters(
     MTRuntimeProfile *profile,
     MTRuntimeKernel *kernel,
     NSError **error);
-
-// Called only after the Kernel has accepted a new canonical snapshot. Ready
-// generations are prewarmed in bounded batches before their exact icon pairs
-// are purged; disabled snapshots purge directly back to stock.
-FOUNDATION_EXPORT void MTRuntimeRefreshConfiguredAdapters(
-    MTRuntimeProfile *profile,
-    MTRuntimeKernel *kernel,
-    MTRuntimeSnapshot *snapshot);
 
 NS_ASSUME_NONNULL_END

@@ -9,19 +9,8 @@ entirely inside the non-injected Manager app, while injected processes run only 
 Runtime. When anything fails validation, returning to the native system appearance is always the correct
 outcome.
 
-The current version is `v0.2.6`. The two jailbreak environments use different packages and the packages
+The current version is `v0.3.1`. The two jailbreak environments use different packages and the packages
 must not be mixed.
-
-`v0.2.6` adds complete cross-theme mixing and per-feature enable switches. Theme Details always lists every
-feature supported by MarkTheme, even when the current theme has no matching resources, so another imported
-theme can fill that feature. Disabled features are omitted from the next Generation and fall back to the native
-system appearance. Overlay enablement and source selection now strictly follow the active mix configuration,
-so a disabled or replaced overlay cannot keep reusing stale artwork.
-
-This release also refines Theme Details and Home interactions: component-source selection is clearer, the
-persistent apply hint is gone, Home has a lightweight Theme Details entry, and sheets with explicit close
-actions no longer duplicate that affordance with a grabber. Mix selections remain persistent and deterministically
-compiled with granular cancellation and native fallback, without adding parsing or writable I/O to Runtime hot paths.
 
 ## Screenshots
 
@@ -36,7 +25,7 @@ compiled with granular cancellation and native fallback, without adding parsing 
 - Recognize supported resources in deep, scattered, or wrapper-less layouts, retain useful ecosystem names, and materialize them into the MarkTheme standard theme layout
 - Strict asset validation, including two-pass ZIP decoding audits, structural and full-pixel PNG validation,
   and bounded plist parsing
-- Recoverable Library revisions for every import, with crash-residue recovery and atomic switching
+- Reimporting the same theme atomically replaces its current Library snapshot; no version history is retained, and crash residue is recovered at startup
 - Publication of compiled output as immutable, root-owned generations that the Runtime can only read
 - Theming for SpringBoard Home Screen and Notification Center icons, folders, badges, Spotlight, Settings,
   Phone, the Photos share sheet, and system share-sheet icons
@@ -47,6 +36,8 @@ compiled with granular cancellation and native fallback, without adding parsing 
 - Cross-theme mixing: keep one theme as the base while sourcing App icons, dynamic Calendar/Clock,
   Settings and Share icons, folders, masks, overlays, badges, status bar art, icon shadows, and dialer
   controls from other imported themes
+- App icons can add ordered second and third fallback sets; later themes fill only Bundle IDs left
+  uncovered by every earlier source
 - Every supported feature can be enabled or disabled independently; disabled features are omitted from
   the Generation and fall back to the native system appearance
 - Image-content replacement on ordinary surfaces; the return-to-Home path adds a temporary square proxy
@@ -115,7 +106,8 @@ manually modify MarkTheme's Runtime Store or Library data.
 - The package contains the Manager app, one short-lived root Helper, and one Runtime. It has no daemon,
   IPC hot path, or polling loop.
 - Outside the return-to-Home animation and folder overlays, adapters replace image content. A folder
-  overlay uses one transparent, non-interactive image view above the folder background and native miniatures.
+  overlay uses one transparent, non-interactive image view above the folder background and native miniatures,
+  while the native folder badge remains above the overlay.
 - The return-to-Home animation uses one transition-scoped square proxy layer to isolate themed source pixels
   from the non-uniform morph. It activates only when the icon actually contains current MarkTheme pixels and
   the complete crossfade ABI has passed validation. It follows the native source fade, restores the source
@@ -164,7 +156,7 @@ themes, Respring, or reboot.
 | `app/` | UIKit Manager app and localized resources |
 | `core/` | Shared foundational types and utilities |
 | `ingestion/`, `importers/` | Archive validation, ZIP decoding audits, and theme metadata parsing |
-| `compiler/`, `library/` | Generation compilation and Library revision management |
+| `compiler/`, `library/` | Generation compilation and current Library snapshot management |
 | `workflow/` | Import workflow state machine and coordination |
 | `store/`, `helper/` | Runtime Store and constrained root helper |
 | `runtime/`, `modules/` | Injected image, process adapters, and theme resource modules |
@@ -181,6 +173,8 @@ artifacts.
 
 ## Acknowledgements
 
+- [Lessica](https://github.com/Lessica) for the inspired, pivotal suggestion behind MarkTheme's
+  foundational refactor and the more reliable direction it established for the project
 - [SnowBoard](https://sparkdev.me/) for establishing the de facto theme-asset and IconBundles ecosystem
   that informs MarkTheme's compatibility
 - [RootHide](https://github.com/roothide/Developer) for the RootHide architecture and compatibility foundation

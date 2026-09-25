@@ -1,15 +1,41 @@
 #import "MTRuntimeABIReport.h"
 
+#import <arpa/inet.h>
+#import <errno.h>
+#import <netinet/in.h>
+#import <notify.h>
+#import <os/log.h>
+#import <sys/socket.h>
 #import <sys/utsname.h>
+#import <time.h>
+#import <unistd.h>
 
-#import "MTBootstrapPaths.h"
-#import "adapters/MTIconImageCacheAdapter.h"
-#import "adapters/MTNotificationIconAdapter.h"
-#import "adapters/MTIconShadowViewAdapter.h"
+#import "MTRuntimeDiagnosticsProtocol.h"
+#import "adapters/MTBadgeNativeSourceAdapter.h"
+#import "adapters/MTCalendarApplicationIconAdapter.h"
+#import "adapters/MTCalendarUIKitSourceAdapter.h"
+#import "adapters/MTClockNativeSourceAdapter.h"
+#import "adapters/MTDialerButtonAdapter.h"
+#import "adapters/MTFolderNativeSourceAdapter.h"
+#import "adapters/MTIconShadowCarrierAdapter.h"
+#import "adapters/MTIconMorphCarrierAdapter.h"
+#import "adapters/MTNotificationIconSourceAdapter.h"
 #import "adapters/MTRuntimeImageABI.h"
+#import "adapters/MTPreferencesUIResourceImageAdapter.h"
+#import "adapters/MTSearchUICalendarIconAdapter.h"
+#import "adapters/MTShareSheetActivityGlyphAdapter.h"
+#import "adapters/MTStatusBarSignalImageAdapter.h"
+#import "modules/MTDialerSnapshotModule.h"
+#import "modules/MTCalendarIconRenderer.h"
+#import "modules/MTClockIconSnapshotModule.h"
 #import "modules/MTIconMaskSnapshotModule.h"
 #import "modules/MTIconOverlaySnapshotModule.h"
+#import "modules/MTIconShadowSnapshotModule.h"
+#import "modules/MTBadgeSnapshotModule.h"
+#import "modules/MTFolderIconSnapshotModule.h"
 #import "modules/MTStaticIconSnapshotModule.h"
+#import "modules/MTStatusBarSnapshotModule.h"
+#import "modules/MTUIResourceSnapshotModule.h"
 
 #include <stdatomic.h>
 #include <string.h>
@@ -20,6 +46,8 @@
 
 static const int64_t MTReportLiveFlushDelayNanoseconds =
     2LL * NSEC_PER_SEC;
+static const int64_t MTReportTransportHeartbeatNanoseconds =
+    3LL * NSEC_PER_SEC;
 
 // The report is written from arbitrary host processes, so every access is
 // serialized on a private queue and no host object is retained.
@@ -67,8 +95,22 @@ static NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *
     MTLatestDataPlaneSamples;
 static NSString *MTActiveProfileID;
 static BOOL MTLiveFlushScheduled;
+static BOOL MTTransportHeartbeatScheduled;
+static int MTTransportRequestToken = NOTIFY_TOKEN_INVALID;
+static NSDictionary<NSString *, id> *MTLastTransportPayload;
+static uint32_t MTLastTransportNonce;
 
 static void MTScheduleLiveFlushLocked(void);
+static void MTScheduleTransportHeartbeatLocked(void);
+
+static os_log_t MTDiagnosticsTransportLog(void) {
+    static os_log_t log;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        log = os_log_create("com.hmmzzz.marktheme", "diagnostics-transport");
+    });
+    return log;
+}
 
 void MTRuntimeABIReportRecordContract(NSString *adapterID,
                                       NSString *contractID,
@@ -196,24 +238,47 @@ BOOL MTRuntimeABIReportProbeImplementation(NSString *ownerID,
     return hookable;
 }
 
-static NSURL *MTReportDirectoryURL(void) {
-    return [MTDefaultManagerDataRootURL()
-        URLByAppendingPathComponent:@"Diagnostics" isDirectory:YES];
-}
-
 #define MT_REPORT_ATOMIC_VALUE(value) \
     @(atomic_load_explicit(&(value), memory_order_relaxed))
 
 static NSDictionary<NSString *, NSArray<NSNumber *> *> *
 MTLiveObservationRecords(void) {
-    MTIconImageCacheAdapterObservation *adapter =
-        &MTRuntimeIconImageCacheAdapterObservation;
-    MTIconImageViewDiagnosticsObservation *desktop =
-        &MTRuntimeIconImageViewDiagnosticsObservation;
-    MTNotificationIconAdapterObservation *notification =
-        &MTRuntimeNotificationIconAdapterObservation;
-    MTIconShadowViewAdapterObservation *iconView =
-        &MTRuntimeIconShadowViewAdapterObservation;
+    MTNotificationIconSourceAdapterObservation *notificationSource =
+        &MTRuntimeNotificationIconSourceAdapterObservation;
+    MTCalendarApplicationIconAdapterObservation *calendar =
+        &MTRuntimeCalendarApplicationIconAdapterObservation;
+    MTCalendarUIKitSourceAdapterObservation *calendarSource =
+        &MTRuntimeCalendarUIKitSourceAdapterObservation;
+    MTCalendarIconRendererObservation *calendarRender =
+        &MTRuntimeCalendarIconRendererObservation;
+    MTClockNativeSourceAdapterObservation *clockSource =
+        &MTRuntimeClockNativeSourceAdapterObservation;
+    MTClockIconSnapshotObservation *clock =
+        &MTRuntimeClockIconSnapshotObservation;
+    MTDialerButtonAdapterObservation *dialerSource =
+        &MTRuntimeDialerButtonAdapterObservation;
+    MTDialerSnapshotObservation *dialer =
+        &MTRuntimeDialerSnapshotObservation;
+    MTFolderNativeSourceAdapterObservation *folderSource =
+        &MTRuntimeFolderNativeSourceAdapterObservation;
+    MTBadgeNativeSourceAdapterObservation *badgeSource =
+        &MTRuntimeBadgeNativeSourceAdapterObservation;
+    MTPreferencesUIResourceImageAdapterObservation *preferencesSource =
+        &MTRuntimePreferencesUIResourceImageAdapterObservation;
+    MTSearchUICalendarIconAdapterObservation *searchCalendar =
+        &MTRuntimeSearchUICalendarIconAdapterObservation;
+    MTShareSheetActivityGlyphAdapterObservation *shareGlyph =
+        &MTRuntimeShareSheetActivityGlyphAdapterObservation;
+    MTStatusBarSignalImageAdapterObservation *statusBarSource =
+        &MTRuntimeStatusBarSignalImageAdapterObservation;
+    MTStatusBarSnapshotObservation *statusBar =
+        &MTRuntimeStatusBarSnapshotObservation;
+    MTIconShadowCarrierAdapterObservation *shadowCarrier =
+        &MTRuntimeIconShadowCarrierAdapterObservation;
+    MTIconShadowSnapshotObservation *shadow =
+        &MTRuntimeIconShadowSnapshotObservation;
+    MTIconMorphCarrierAdapterObservation *iconMorph =
+        &MTRuntimeIconMorphCarrierAdapterObservation;
     MTStaticIconSnapshotObservation *staticIcons =
         &MTRuntimeStaticIconSnapshotObservation;
     MTIconMaskSnapshotObservation *iconMask =
@@ -222,56 +287,222 @@ MTLiveObservationRecords(void) {
         &MTRuntimeIconOverlaySnapshotObservation;
     MTIconOverlayDiagnosticsObservation *overlayDebug =
         &MTRuntimeIconOverlayDiagnosticsObservation;
-    // Schema 2 uses fixed arrays so the injected image does not carry every
-    // display label. The Manager expands these positions into readable names.
+    MTFolderIconSnapshotObservation *folderIcons =
+        &MTRuntimeFolderIconSnapshotObservation;
+    MTBadgeSnapshotObservation *badge =
+        &MTRuntimeBadgeSnapshotObservation;
+    MTUIResourceSnapshotObservation *uiResources =
+        &MTRuntimeUIResourceSnapshotObservation;
+    // Compact observation schemas use fixed arrays so the injected image does
+    // not carry every display label. The Manager expands these positions into
+    // readable names.
     return @{
-        @"icon" : @[
-            MT_REPORT_ATOMIC_VALUE(adapter->state),
-            MT_REPORT_ATOMIC_VALUE(adapter->totalCalls),
-            MT_REPORT_ATOMIC_VALUE(adapter->identityStringResults),
-            MT_REPORT_ATOMIC_VALUE(adapter->resolverCalls),
-            MT_REPORT_ATOMIC_VALUE(adapter->replacementResults),
-            MT_REPORT_ATOMIC_VALUE(adapter->transitionCalls),
-            MT_REPORT_ATOMIC_VALUE(adapter->transitionReplacements),
-            MT_REPORT_ATOMIC_VALUE(adapter->morphPrepareCalls),
-            MT_REPORT_ATOMIC_VALUE(adapter->morphProxyActivations),
-            MT_REPORT_ATOMIC_VALUE(adapter->morphFadeSynchronizations),
-            MT_REPORT_ATOMIC_VALUE(adapter->morphCleanups),
-            MT_REPORT_ATOMIC_VALUE(adapter->squareMaskCompositions),
-            MT_REPORT_ATOMIC_VALUE(adapter->cacheRequestCalls),
-            MT_REPORT_ATOMIC_VALUE(adapter->cacheRequestRecipients),
-            MT_REPORT_ATOMIC_VALUE(adapter->viewRecipientRecords),
-            MT_REPORT_ATOMIC_VALUE(adapter->refreshRequests),
-            MT_REPORT_ATOMIC_VALUE(adapter->refreshExecutions),
-            MT_REPORT_ATOMIC_VALUE(adapter->refreshCachePurges),
-            MT_REPORT_ATOMIC_VALUE(adapter->refreshIconPurges),
-            MT_REPORT_ATOMIC_VALUE(adapter->refreshObserverNotifications),
-            MT_REPORT_ATOMIC_VALUE(adapter->refreshNativeRecaches),
+        @"notificationSource" : @[
+            MT_REPORT_ATOMIC_VALUE(notificationSource->state),
+            MT_REPORT_ATOMIC_VALUE(notificationSource->installAttempts),
+            MT_REPORT_ATOMIC_VALUE(notificationSource->totalCalls),
+            MT_REPORT_ATOMIC_VALUE(notificationSource->identityResults),
+            MT_REPORT_ATOMIC_VALUE(notificationSource->resolverCalls),
+            MT_REPORT_ATOMIC_VALUE(notificationSource->replacementResults),
+            MT_REPORT_ATOMIC_VALUE(notificationSource->mappedCacheClears),
+            MT_REPORT_ATOMIC_VALUE(notificationSource->contractRejects),
         ],
-        @"desktop" : @[
-            MT_REPORT_ATOMIC_VALUE(desktop->contentsCalls),
-            MT_REPORT_ATOMIC_VALUE(desktop->displayCalls),
-            MT_REPORT_ATOMIC_VALUE(desktop->displayStationaryRealCalls),
-            MT_REPORT_ATOMIC_VALUE(desktop->identityMisses),
-            MT_REPORT_ATOMIC_VALUE(desktop->resolverCalls),
-            MT_REPORT_ATOMIC_VALUE(desktop->alreadyCurrentResults),
-            MT_REPORT_ATOMIC_VALUE(desktop->replacementResults),
-            MT_REPORT_ATOMIC_VALUE(desktop->resolverMisses),
+        @"calendar" : @[
+            MT_REPORT_ATOMIC_VALUE(calendar->installed),
+            MT_REPORT_ATOMIC_VALUE(calendar->generatedCalls),
+            MT_REPORT_ATOMIC_VALUE(calendar->appearanceReplacements),
         ],
-        @"notification" : @[
-            MT_REPORT_ATOMIC_VALUE(notification->state),
-            MT_REPORT_ATOMIC_VALUE(notification->totalCalls),
-            MT_REPORT_ATOMIC_VALUE(notification->identityResults),
-            MT_REPORT_ATOMIC_VALUE(notification->replacementResults),
+        @"calendarSource" : @[
+            MT_REPORT_ATOMIC_VALUE(calendarSource->state),
+            MT_REPORT_ATOMIC_VALUE(calendarSource->calls),
+            MT_REPORT_ATOMIC_VALUE(calendarSource->outOfScopeCalls),
+            MT_REPORT_ATOMIC_VALUE(calendarSource->originalFailures),
+            MT_REPORT_ATOMIC_VALUE(calendarSource->resolverMisses),
+            MT_REPORT_ATOMIC_VALUE(calendarSource->rasterRejects),
+            MT_REPORT_ATOMIC_VALUE(calendarSource->replacements),
         ],
-        @"view" : @[
-            MT_REPORT_ATOMIC_VALUE(iconView->state),
-            MT_REPORT_ATOMIC_VALUE(iconView->configureCalls),
-            MT_REPORT_ATOMIC_VALUE(iconView->imageInfoCalls),
-            MT_REPORT_ATOMIC_VALUE(iconView->resolverCalls),
-            MT_REPORT_ATOMIC_VALUE(iconView->appliedResults),
-            MT_REPORT_ATOMIC_VALUE(iconView->refreshRequests),
-            MT_REPORT_ATOMIC_VALUE(iconView->refreshExecutions),
+        @"calendarRender" : @[
+            MT_REPORT_ATOMIC_VALUE(calendarRender->renderAttempts),
+            MT_REPORT_ATOMIC_VALUE(calendarRender->renderSuccesses),
+            MT_REPORT_ATOMIC_VALUE(calendarRender->renderFailures),
+        ],
+        @"clockSource" : @[
+            MT_REPORT_ATOMIC_VALUE(clockSource->state),
+            MT_REPORT_ATOMIC_VALUE(clockSource->faceSourceCalls),
+            MT_REPORT_ATOMIC_VALUE(clockSource->maskedFaceCalls),
+            MT_REPORT_ATOMIC_VALUE(clockSource->unmaskedFaceCalls),
+            MT_REPORT_ATOMIC_VALUE(clockSource->themedFaces),
+            MT_REPORT_ATOMIC_VALUE(clockSource->handSourceCalls),
+            MT_REPORT_ATOMIC_VALUE(clockSource->themedHandSets),
+            MT_REPORT_ATOMIC_VALUE(clockSource->originalFailures),
+            MT_REPORT_ATOMIC_VALUE(clockSource->resolverMisses),
+            MT_REPORT_ATOMIC_VALUE(clockSource->contractRejects),
+        ],
+        @"clock" : @[
+            MT_REPORT_ATOMIC_VALUE(clock->state),
+            MT_REPORT_ATOMIC_VALUE(clock->resourceRequests),
+            MT_REPORT_ATOMIC_VALUE(clock->resourceHits),
+            MT_REPORT_ATOMIC_VALUE(clock->decodeSuccesses),
+            MT_REPORT_ATOMIC_VALUE(clock->decodeFailures),
+            MT_REPORT_ATOMIC_VALUE(clock->imageSetPublishes),
+            MT_REPORT_ATOMIC_VALUE(clock->componentMatchRequests),
+            MT_REPORT_ATOMIC_VALUE(clock->componentMatchResults),
+        ],
+        @"dialerSource" : @[
+            MT_REPORT_ATOMIC_VALUE(dialerSource->state),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->installAttempts),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->numberSourceCalls),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->numberNormalCalls),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->numberHighlightedCalls),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->circleAlphaCalls),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->circleSuppressions),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->callButtonCreations),
+            MT_REPORT_ATOMIC_VALUE(
+                dialerSource->callNormalReplacements),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->callOverlayRequests),
+            MT_REPORT_ATOMIC_VALUE(
+                dialerSource->callPressedReplacements),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->resolverMisses),
+            MT_REPORT_ATOMIC_VALUE(dialerSource->contractRejects),
+        ],
+        @"dialer" : @[
+            MT_REPORT_ATOMIC_VALUE(dialer->state),
+            MT_REPORT_ATOMIC_VALUE(dialer->imageRequests),
+            MT_REPORT_ATOMIC_VALUE(dialer->contractRejects),
+            MT_REPORT_ATOMIC_VALUE(dialer->resourceHits),
+            MT_REPORT_ATOMIC_VALUE(dialer->cacheHits),
+            MT_REPORT_ATOMIC_VALUE(dialer->decodeSuccesses),
+            MT_REPORT_ATOMIC_VALUE(dialer->decodeFailures),
+            MT_REPORT_ATOMIC_VALUE(dialer->replacementResults),
+            MT_REPORT_ATOMIC_VALUE(dialer->completeSetChecks),
+            MT_REPORT_ATOMIC_VALUE(dialer->completeSetPasses),
+        ],
+        @"folderSource" : @[
+            MT_REPORT_ATOMIC_VALUE(folderSource->state),
+            MT_REPORT_ATOMIC_VALUE(folderSource->sourceCalls),
+            MT_REPORT_ATOMIC_VALUE(folderSource->nativeBackgroundCalls),
+            MT_REPORT_ATOMIC_VALUE(folderSource->nilBackgroundCalls),
+            MT_REPORT_ATOMIC_VALUE(folderSource->themedBackgrounds),
+            MT_REPORT_ATOMIC_VALUE(folderSource->overlayActivations),
+            MT_REPORT_ATOMIC_VALUE(folderSource->nativeFallbacks),
+            MT_REPORT_ATOMIC_VALUE(folderSource->contractRejects),
+        ],
+        @"badgeSource" : @[
+            MT_REPORT_ATOMIC_VALUE(badgeSource->state),
+            MT_REPORT_ATOMIC_VALUE(badgeSource->installAttempts),
+            MT_REPORT_ATOMIC_VALUE(badgeSource->sourceCalls),
+            MT_REPORT_ATOMIC_VALUE(badgeSource->mainThreadCalls),
+            MT_REPORT_ATOMIC_VALUE(badgeSource->nativeBackgroundCalls),
+            MT_REPORT_ATOMIC_VALUE(badgeSource->themedBackgrounds),
+            MT_REPORT_ATOMIC_VALUE(badgeSource->nativeFallbacks),
+            MT_REPORT_ATOMIC_VALUE(badgeSource->contractRejects),
+        ],
+        @"preferencesSource" : @[
+            MT_REPORT_ATOMIC_VALUE(preferencesSource->state),
+            MT_REPORT_ATOMIC_VALUE(preferencesSource->installAttempts),
+            MT_REPORT_ATOMIC_VALUE(preferencesSource->totalCalls),
+            MT_REPORT_ATOMIC_VALUE(preferencesSource->stringKeys),
+            MT_REPORT_ATOMIC_VALUE(preferencesSource->nilOriginalResults),
+            MT_REPORT_ATOMIC_VALUE(preferencesSource->replacementResults),
+        ],
+        @"searchCalendar" : @[
+            MT_REPORT_ATOMIC_VALUE(searchCalendar->state),
+            MT_REPORT_ATOMIC_VALUE(searchCalendar->calls),
+            MT_REPORT_ATOMIC_VALUE(searchCalendar->replacements),
+            MT_REPORT_ATOMIC_VALUE(searchCalendar->trackedImages),
+            MT_REPORT_ATOMIC_VALUE(searchCalendar->refreshRequests),
+            MT_REPORT_ATOMIC_VALUE(searchCalendar->refreshInvalidations),
+        ],
+        @"shareGlyph" : @[
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->state),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->installAttempts),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->requestCalls),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->deliveryCalls),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->applicationContexts),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->customContexts),
+            MT_REPORT_ATOMIC_VALUE(
+                shareGlyph->nativeApplicationBridgeResults),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->replacements),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->providersTracked),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->contextMisses),
+            MT_REPORT_ATOMIC_VALUE(shareGlyph->contractRejects),
+        ],
+        @"statusBarSource" : @[
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->state),
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->installAttempts),
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->wifiCommitCalls),
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->cellularCommitCalls),
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->mainThreadCalls),
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->resolverCalls),
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->appliedResults),
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->stockFallbacks),
+            MT_REPORT_ATOMIC_VALUE(statusBarSource->contractRejects),
+        ],
+        @"statusBar" : @[
+            MT_REPORT_ATOMIC_VALUE(statusBar->state),
+            MT_REPORT_ATOMIC_VALUE(statusBar->nativeCommitRequests),
+            MT_REPORT_ATOMIC_VALUE(statusBar->contextRequests),
+            MT_REPORT_ATOMIC_VALUE(statusBar->contextMisses),
+            MT_REPORT_ATOMIC_VALUE(statusBar->resourceHits),
+            MT_REPORT_ATOMIC_VALUE(statusBar->cacheHits),
+            MT_REPORT_ATOMIC_VALUE(statusBar->decodeSuccesses),
+            MT_REPORT_ATOMIC_VALUE(statusBar->decodeFailures),
+            MT_REPORT_ATOMIC_VALUE(statusBar->replacementResults),
+            MT_REPORT_ATOMIC_VALUE(statusBar->stockRestores),
+        ],
+        @"shadowCarrier" : @[
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->state),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->installAttempts),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->layoutCalls),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->reuseCalls),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->mainThreadCalls),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->folderExclusions),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->resolverCalls),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->appliedResults),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->cleanupCalls),
+            MT_REPORT_ATOMIC_VALUE(shadowCarrier->contractRejects),
+        ],
+        @"shadow" : @[
+            MT_REPORT_ATOMIC_VALUE(shadow->state),
+            MT_REPORT_ATOMIC_VALUE(shadow->preparationAttempts),
+            MT_REPORT_ATOMIC_VALUE(shadow->resourceHits),
+            MT_REPORT_ATOMIC_VALUE(shadow->decodeSuccesses),
+            MT_REPORT_ATOMIC_VALUE(shadow->decodeFailures),
+            MT_REPORT_ATOMIC_VALUE(shadow->carrierResolutions),
+            MT_REPORT_ATOMIC_VALUE(shadow->attachmentsCreated),
+            MT_REPORT_ATOMIC_VALUE(shadow->attachmentUpdates),
+            MT_REPORT_ATOMIC_VALUE(shadow->attachmentsRemoved),
+            MT_REPORT_ATOMIC_VALUE(shadow->contextMisses),
+        ],
+        @"morph" : @[
+            MT_REPORT_ATOMIC_VALUE(iconMorph->state),
+            MT_REPORT_ATOMIC_VALUE(iconMorph->squareContentsCalls),
+            MT_REPORT_ATOMIC_VALUE(iconMorph->eligibleCarriers),
+            MT_REPORT_ATOMIC_VALUE(iconMorph->prepareCalls),
+            MT_REPORT_ATOMIC_VALUE(iconMorph->proxyActivations),
+            MT_REPORT_ATOMIC_VALUE(iconMorph->fadeSynchronizations),
+            MT_REPORT_ATOMIC_VALUE(iconMorph->cleanups),
+        ],
+        @"folder" : @[
+            MT_REPORT_ATOMIC_VALUE(folderIcons->state),
+            MT_REPORT_ATOMIC_VALUE(folderIcons->baseResourceHits),
+            MT_REPORT_ATOMIC_VALUE(folderIcons->lightResourceHits),
+            MT_REPORT_ATOMIC_VALUE(folderIcons->decodeSuccesses),
+            MT_REPORT_ATOMIC_VALUE(folderIcons->decodeFailures),
+            MT_REPORT_ATOMIC_VALUE(folderIcons->backgroundResolutions),
+            MT_REPORT_ATOMIC_VALUE(folderIcons->backgroundReplacements),
+            MT_REPORT_ATOMIC_VALUE(folderIcons->overlayActivations),
+        ],
+        @"badge" : @[
+            MT_REPORT_ATOMIC_VALUE(badge->state),
+            MT_REPORT_ATOMIC_VALUE(badge->lightResourceHits),
+            MT_REPORT_ATOMIC_VALUE(badge->darkResourceHits),
+            MT_REPORT_ATOMIC_VALUE(badge->decodeSuccesses),
+            MT_REPORT_ATOMIC_VALUE(badge->decodeFailures),
+            MT_REPORT_ATOMIC_VALUE(badge->nativeSourceResolutions),
+            MT_REPORT_ATOMIC_VALUE(badge->appearanceSelections),
+            MT_REPORT_ATOMIC_VALUE(badge->themedBackgrounds),
+            MT_REPORT_ATOMIC_VALUE(badge->nativeFallbacks),
         ],
         @"static" : @[
             MT_REPORT_ATOMIC_VALUE(staticIcons->state),
@@ -280,13 +511,12 @@ MTLiveObservationRecords(void) {
             MT_REPORT_ATOMIC_VALUE(staticIcons->snapshotMisses),
             MT_REPORT_ATOMIC_VALUE(staticIcons->resourceHits),
             MT_REPORT_ATOMIC_VALUE(staticIcons->cacheHits),
-            MT_REPORT_ATOMIC_VALUE(staticIcons->decodeScheduled),
+            MT_REPORT_ATOMIC_VALUE(staticIcons->decodeAttempts),
             MT_REPORT_ATOMIC_VALUE(staticIcons->decodeSuccesses),
             MT_REPORT_ATOMIC_VALUE(staticIcons->decodeFailures),
         ],
         @"mask" : @[
             MT_REPORT_ATOMIC_VALUE(iconMask->state),
-            MT_REPORT_ATOMIC_VALUE(iconMask->reloads),
             MT_REPORT_ATOMIC_VALUE(iconMask->decodeSuccesses),
             MT_REPORT_ATOMIC_VALUE(iconMask->decodeFailures),
             MT_REPORT_ATOMIC_VALUE(iconMask->resolutionCalls),
@@ -296,13 +526,12 @@ MTLiveObservationRecords(void) {
             MT_REPORT_ATOMIC_VALUE(iconMask->memoryPressurePurges),
             MT_REPORT_ATOMIC_VALUE(iconMask->cacheEvictions),
         ],
-        // Field order: state, reloads, overlayResourceHits, decodeSuccesses,
+        // Field order: state, overlayResourceHits, decodeSuccesses,
         // decodeFailures, resolutionCalls, unsupportedCandidateMisses,
         // alreadyProcessedHits, cacheHits, compositions,
         // memoryPressurePurges, cacheEvictions.
         @"overlay" : @[
             MT_REPORT_ATOMIC_VALUE(iconOverlay->state),
-            MT_REPORT_ATOMIC_VALUE(iconOverlay->reloads),
             MT_REPORT_ATOMIC_VALUE(iconOverlay->overlayResourceHits),
             MT_REPORT_ATOMIC_VALUE(iconOverlay->decodeSuccesses),
             MT_REPORT_ATOMIC_VALUE(iconOverlay->decodeFailures),
@@ -325,64 +554,189 @@ MTLiveObservationRecords(void) {
                 overlayDebug->overlayUnavailableMisses),
             MT_REPORT_ATOMIC_VALUE(overlayDebug->compositionMisses),
         ],
+        @"uiResources" : @[
+            MT_REPORT_ATOMIC_VALUE(uiResources->state),
+            MT_REPORT_ATOMIC_VALUE(uiResources->lookupCalls),
+            MT_REPORT_ATOMIC_VALUE(uiResources->snapshotMisses),
+            MT_REPORT_ATOMIC_VALUE(uiResources->resourceHits),
+            MT_REPORT_ATOMIC_VALUE(uiResources->cacheHits),
+            MT_REPORT_ATOMIC_VALUE(uiResources->decodeSuccesses),
+            MT_REPORT_ATOMIC_VALUE(uiResources->decodeFailures),
+            MT_REPORT_ATOMIC_VALUE(uiResources->replacementResults),
+            MT_REPORT_ATOMIC_VALUE(uiResources->memoryPressurePurges),
+        ],
     };
 }
 
 #undef MT_REPORT_ATOMIC_VALUE
 
-static void MTWriteReportLocked(NSString *profile) {
-    @autoreleasepool {
-        NSURL *directory = MTReportDirectoryURL();
-        if (directory == nil) return;
-        struct utsname systemInfo = {0};
-        uname(&systemInfo);
-        NSMutableDictionary<NSString *, id> *report =
-            [NSMutableDictionary dictionary];
-        report[@"schemaVersion"] = @3;
-        report[@"runtimeBuild"] = @(MARKTHEME_RUNTIME_BUILD_NUMBER);
-        report[@"generatedAt"] = [[[NSISO8601DateFormatter alloc] init]
-            stringFromDate:NSDate.date] ?: @"";
-        report[@"processIdentifier"] =
-            @(NSProcessInfo.processInfo.processIdentifier);
-        report[@"profile"] = profile;
-        report[@"process"] =
-            NSProcessInfo.processInfo.processName ?: @"unknown";
+static NSDictionary<NSString *, id> *MTReportPayloadLocked(
+    NSString *profile) {
+    struct utsname systemInfo = {0};
+    uname(&systemInfo);
+    return @{
+        @"schemaVersion" : @3,
+        @"runtimeBuild" : @(MARKTHEME_RUNTIME_BUILD_NUMBER),
+        @"processIdentifier" :
+            @(NSProcessInfo.processInfo.processIdentifier),
+        @"profile" : profile,
+        @"process" : NSProcessInfo.processInfo.processName ?: @"unknown",
         // Compatibility remains a pure capability probe. Build and snapshot
         // values are evidence only and never gate Hook installation.
-        report[@"systemVersion"] =
-            NSProcessInfo.processInfo.operatingSystemVersionString ?: @"";
-        report[@"machine"] =
-            [NSString stringWithUTF8String:systemInfo.machine] ?: @"";
-        report[@"adapters"] = [MTAdapterStates() copy];
-        report[@"modules"] = [MTModuleStates() copy];
-        report[@"contracts"] = [MTContractRecords() copy];
-        report[@"runtime"] = MTRuntimeSnapshotRecord ?: @{};
-        report[@"observationSchema"] = @2;
-        report[@"observations"] = MTLiveObservationRecords();
-        report[@"samples"] = [MTLatestDataPlaneSamples copy] ?: @{};
+        @"systemVersion" :
+            NSProcessInfo.processInfo.operatingSystemVersionString ?: @"",
+        @"machine" :
+            [NSString stringWithUTF8String:systemInfo.machine] ?: @"",
+        @"adapters" : [MTAdapterStates() copy],
+        @"modules" : [MTModuleStates() copy],
+        @"contracts" : [MTContractRecords() copy],
+        @"runtime" : MTRuntimeSnapshotRecord ?: @{},
+        @"observationSchema" : @8,
+        @"observations" : MTLiveObservationRecords(),
+        @"samples" : [MTLatestDataPlaneSamples copy] ?: @{},
+    };
+}
 
-        NSError *error = nil;
-        NSData *data = [NSJSONSerialization
-            dataWithJSONObject:report
-                       options:NSJSONWritingPrettyPrinted |
-                               NSJSONWritingSortedKeys
-                         error:&error];
-        if (data == nil) return;
-        [NSFileManager.defaultManager
-            createDirectoryAtURL:directory
-     withIntermediateDirectories:YES
-                      attributes:nil
-                           error:NULL];
-        NSString *fileName = [NSString stringWithFormat:@"%@-%@.json",
-            profile, report[@"process"]];
-        NSURL *fileURL =
-            [directory URLByAppendingPathComponent:fileName];
-        [data writeToURL:fileURL options:NSDataWritingAtomic error:NULL];
+static NSData *_Nullable MTTransportDataForPayload(
+    NSDictionary<NSString *, id> *payload,
+    uint32_t nonce) {
+    NSMutableDictionary<NSString *, id> *report = [payload mutableCopy];
+    report[@"generatedAt"] = [[[NSISO8601DateFormatter alloc] init]
+        stringFromDate:NSDate.date] ?: @"";
+    NSMutableDictionary<NSString *, id> *transport = [@{
+        @"schemaVersion" : @1,
+        @"method" : @"loopback-udp",
+        @"nonce" : @(nonce),
+    } mutableCopy];
+    report[@"transport"] = transport;
+
+    __block NSError *error = nil;
+    NSData *(^serialize)(void) = ^NSData *{
+        return [NSJSONSerialization dataWithJSONObject:report
+            options:NSJSONWritingSortedKeys error:&error];
+    };
+    NSData *data = serialize();
+    if (data != nil &&
+        data.length <= MTRuntimeDiagnosticsMaximumDatagramByteCount) {
+        return data;
+    }
+
+    NSArray<NSDictionary<NSString *, id> *> *contracts =
+        [report[@"contracts"] isKindOfClass:NSArray.class]
+            ? report[@"contracts"] : @[];
+    NSMutableArray<NSDictionary<NSString *, id> *> *failures =
+        [NSMutableArray array];
+    for (id value in contracts) {
+        if ([value isKindOfClass:NSDictionary.class] &&
+            ![value[@"satisfied"] boolValue]) {
+            [failures addObject:value];
+        }
+    }
+    report[@"contracts"] = failures;
+    report[@"contractSummary"] = @{
+        @"total" : @(contracts.count),
+        @"failures" : @(failures.count),
+        @"satisfiedContractsOmitted" :
+            @(contracts.count - failures.count),
+    };
+    transport[@"truncatedSatisfiedContracts"] = @YES;
+    error = nil;
+    data = serialize();
+    if (data != nil &&
+        data.length <= MTRuntimeDiagnosticsMaximumDatagramByteCount) {
+        return data;
+    }
+
+    report[@"samples"] = @{};
+    transport[@"truncatedSamples"] = @YES;
+    error = nil;
+    data = serialize();
+    if (data != nil &&
+        data.length <= MTRuntimeDiagnosticsMaximumDatagramByteCount) {
+        return data;
+    }
+    os_log_with_type(MTDiagnosticsTransportLog(), OS_LOG_TYPE_ERROR,
+        "report serialization exceeded datagram boundary profile=%{public}@ "
+        "bytes=%{public}lu error=%{public}@/%{public}ld",
+        payload[@"profile"] ?: @"unknown", (unsigned long)data.length,
+        error.domain ?: @"none", (long)error.code);
+    return nil;
+}
+
+static BOOL MTActiveCollectionRequestLocked(
+    MTRuntimeDiagnosticsCollectionRequest *requestOut) {
+    if (MTTransportRequestToken == NOTIFY_TOKEN_INVALID) return NO;
+    uint64_t word = 0;
+    if (notify_get_state(MTTransportRequestToken, &word) !=
+        NOTIFY_STATUS_OK) {
+        return NO;
+    }
+    return MTRuntimeDiagnosticsDecodeCollectionRequestWord(
+        word, (uint64_t)time(NULL), requestOut);
+}
+
+static BOOL MTSendActiveReportIfRequestedLocked(BOOL force) {
+    if (MTActiveProfileID.length == 0) return NO;
+    MTRuntimeDiagnosticsCollectionRequest request = {0};
+    if (!MTActiveCollectionRequestLocked(&request)) return NO;
+    NSDictionary<NSString *, id> *payload =
+        MTReportPayloadLocked(MTActiveProfileID);
+    if (!force && request.nonce == MTLastTransportNonce &&
+        [payload isEqualToDictionary:MTLastTransportPayload]) {
+        return YES;
+    }
+    NSData *data = MTTransportDataForPayload(payload, request.nonce);
+    if (data == nil) return NO;
+
+    int socketDescriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (socketDescriptor < 0) {
+        os_log_with_type(MTDiagnosticsTransportLog(), OS_LOG_TYPE_ERROR,
+            "loopback socket failed profile=%{public}@ errno=%{public}d",
+            MTActiveProfileID, errno);
+        return NO;
+    }
+    struct sockaddr_in destination = {0};
+    destination.sin_len = sizeof(destination);
+    destination.sin_family = AF_INET;
+    destination.sin_port = htons(request.port);
+    destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ssize_t sent = sendto(socketDescriptor, data.bytes, data.length, 0,
+        (const struct sockaddr *)&destination, sizeof(destination));
+    int sendError = sent == (ssize_t)data.length ? 0 : errno;
+    close(socketDescriptor);
+    if (sendError != 0) {
+        os_log_with_type(MTDiagnosticsTransportLog(), OS_LOG_TYPE_ERROR,
+            "loopback report failed profile=%{public}@ errno=%{public}d",
+            MTActiveProfileID, sendError);
+        return NO;
+    }
+    MTLastTransportPayload = payload;
+    MTLastTransportNonce = request.nonce;
+    return YES;
+}
+
+static void MTEnsureTransportRegistrationLocked(void) {
+    if (MTTransportRequestToken != NOTIFY_TOKEN_INVALID) return;
+    int token = NOTIFY_TOKEN_INVALID;
+    int result = notify_register_dispatch(
+        MTRuntimeDiagnosticsCollectionRequestNotificationName.UTF8String,
+        &token, MTReportQueue(), ^(__unused int callbackToken) {
+            (void)MTSendActiveReportIfRequestedLocked(YES);
+            MTScheduleTransportHeartbeatLocked();
+        });
+    if (result == NOTIFY_STATUS_OK) {
+        MTTransportRequestToken = token;
+    } else {
+        os_log_with_type(MTDiagnosticsTransportLog(), OS_LOG_TYPE_ERROR,
+            "collection request registration failed status=%{public}d",
+            result);
     }
 }
 
 static void MTScheduleLiveFlushLocked(void) {
     if (MTActiveProfileID.length == 0 || MTLiveFlushScheduled) return;
+    MTRuntimeDiagnosticsCollectionRequest request = {0};
+    if (!MTActiveCollectionRequestLocked(&request)) return;
     MTLiveFlushScheduled = YES;
     dispatch_after(
         dispatch_time(DISPATCH_TIME_NOW,
@@ -390,7 +744,24 @@ static void MTScheduleLiveFlushLocked(void) {
         MTReportQueue(), ^{
             MTLiveFlushScheduled = NO;
             if (MTActiveProfileID.length > 0) {
-                MTWriteReportLocked(MTActiveProfileID);
+                (void)MTSendActiveReportIfRequestedLocked(NO);
+            }
+        });
+}
+
+static void MTScheduleTransportHeartbeatLocked(void) {
+    if (MTTransportHeartbeatScheduled) return;
+    MTRuntimeDiagnosticsCollectionRequest request = {0};
+    if (!MTActiveCollectionRequestLocked(&request)) return;
+    MTTransportHeartbeatScheduled = YES;
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW,
+                      MTReportTransportHeartbeatNanoseconds),
+        MTReportQueue(), ^{
+            MTTransportHeartbeatScheduled = NO;
+            if (MTActiveCollectionRequestLocked(NULL)) {
+                (void)MTSendActiveReportIfRequestedLocked(NO);
+                MTScheduleTransportHeartbeatLocked();
             }
         });
 }
@@ -399,6 +770,8 @@ void MTRuntimeABIReportFlush(NSString *profileID) {
     NSString *profile = profileID.length > 0 ? [profileID copy] : @"unknown";
     dispatch_async(MTReportQueue(), ^{
         MTActiveProfileID = profile;
-        MTWriteReportLocked(profile);
+        MTEnsureTransportRegistrationLocked();
+        (void)MTSendActiveReportIfRequestedLocked(NO);
+        MTScheduleTransportHeartbeatLocked();
     });
 }

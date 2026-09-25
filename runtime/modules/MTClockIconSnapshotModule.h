@@ -1,15 +1,40 @@
 #import <Foundation/Foundation.h>
 #import <dispatch/dispatch.h>
 
+#include <stdatomic.h>
+#include <stdint.h>
+
 @class MTRuntimeKernel;
 
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString *const MTClockIconSnapshotModuleID;
 
-// Immutable hand images decoded once per active Generation. The live face
-// reuses the static icon module's decoded background; each optional hand
-// component falls back independently to the system image.
+typedef NS_ENUM(uint32_t, MTClockIconSnapshotModuleState) {
+    MTClockIconSnapshotModuleStateDormant = 0,
+    MTClockIconSnapshotModuleStateConfigured = 1,
+    MTClockIconSnapshotModuleStateReady = 2,
+};
+
+typedef struct MTClockIconSnapshotObservation {
+    uint32_t schemaVersion;
+    _Atomic(uint32_t) state;
+    _Atomic(uint64_t) resourceRequests;
+    _Atomic(uint64_t) resourceHits;
+    _Atomic(uint64_t) decodeSuccesses;
+    _Atomic(uint64_t) decodeFailures;
+    _Atomic(uint64_t) imageSetPublishes;
+    _Atomic(uint64_t) componentMatchRequests;
+    _Atomic(uint64_t) componentMatchResults;
+} MTClockIconSnapshotObservation;
+
+FOUNDATION_EXPORT MTClockIconSnapshotObservation
+    MTRuntimeClockIconSnapshotObservation;
+
+// Immutable legacy hand artwork decoded once per active Generation. The
+// native-source adapter asks this module to match those images to the exact
+// component geometry produced by SpringBoardHome; each absent or invalid
+// component falls back independently to Apple's image.
 @interface MTClockIconImageSet : NSObject
 
 @property(nonatomic, copy, readonly) NSString *generationIdentifier;
@@ -27,13 +52,18 @@ FOUNDATION_EXPORT NSString *const MTClockIconSnapshotModuleID;
 FOUNDATION_EXPORT BOOL MTClockIconSnapshotConfigure(
     MTRuntimeKernel *kernel,
     NSError **error);
-// Prepares the active Generation's immutable hand set before returning.
-// Bootstrap calls this before installing Clock hooks; later reloads already
-// run on the Kernel's utility queue.
-FOUNDATION_EXPORT void MTClockIconSnapshotReload(void);
-FOUNDATION_EXPORT void MTClockIconSnapshotSetReadyHandler(
-    dispatch_block_t _Nullable handler);
+// Prepares the active Generation's immutable legacy hand set before returning.
+// Bootstrap calls this before installing Clock source hooks. Theme changes use
+// a Respring boundary because SpringBoardHome owns process-lifetime face and
+// hand caches.
 FOUNDATION_EXPORT MTClockIconImageSet * _Nullable
     MTClockIconSnapshotCurrentImageSet(void);
+FOUNDATION_EXPORT MTClockIconImageSet * _Nullable
+    MTClockIconSnapshotImageSetMatchingNativeComponents(
+        id _Nullable hourHand,
+        id _Nullable minuteHand,
+        id _Nullable secondHand,
+        id _Nullable hourMinuteDot,
+        id _Nullable secondDot);
 
 NS_ASSUME_NONNULL_END

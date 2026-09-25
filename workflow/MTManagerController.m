@@ -339,19 +339,11 @@ MTManagerBuildCapabilityReports(
     // Generations published before cross-theme configuration records existed
     // remain exact only for the legacy, unmodified single-theme default.
     return desiredMix.sourceThemeIdentifiersByFeature.count == 0 &&
+        desiredMix.appIconFallbackThemeIdentifiers.count == 0 &&
         desiredMix.disabledFeatureIdentifiers.count == 0 &&
         [self.activeRevisionIdentifier isEqualToString:
             theme.currentRevision.revisionIdentifier] &&
         [self.activeComponentSelection isEqual:desired];
-}
-
-- (BOOL)runtimeUsesThemeIdentifier:(NSString *)themeIdentifier {
-    if (!self.runtimeEnabled || themeIdentifier.length == 0) return NO;
-    if (self.activeMixSelection != nil) {
-        return [self.activeMixSelection.effectiveThemeIdentifiers
-            containsObject:themeIdentifier];
-    }
-    return [self.activeThemeIdentifier isEqualToString:themeIdentifier];
 }
 
 - (MTManagerSnapshot *)snapshotWithSelectedThemeIdentifier:
@@ -740,15 +732,10 @@ static BOOL MTManagerThemeSupportsFeature(
     if (runtimeEnabled && activeGenerationIdentifier.length > 0) {
         MTThemeLibraryThemeSummary *activeTheme =
             themeIndex[activeThemeIdentifier];
-        MTThemeLibraryRevisionSummary *activeRevision = nil;
-        for (MTThemeLibraryRevisionSummary *candidate in
-                activeTheme.revisionHistory) {
-            if ([candidate.revisionIdentifier
-                    isEqualToString:activeRevisionIdentifier]) {
-                activeRevision = candidate;
-                break;
-            }
-        }
+        MTThemeLibraryRevisionSummary *activeRevision =
+            [activeTheme.currentRevision.revisionIdentifier
+                isEqualToString:activeRevisionIdentifier]
+            ? activeTheme.currentRevision : nil;
         MTThemeComponentCatalog *activeCatalog = activeRevision == nil
             ? nil : [MTThemeComponentCatalog
                 catalogForManifest:activeRevision.manifest error:NULL];
@@ -1112,8 +1099,17 @@ static BOOL MTManagerThemeSupportsFeature(
             if (completion != nil) completion(YES, nil);
             return;
         }
+        BOOL fallbackIntentUnchanged =
+            [updated.appIconFallbackThemeIdentifiers isEqualToArray:
+                current.appIconFallbackThemeIdentifiers] &&
+            [[updated sourceThemeIdentifierForFeatureIdentifier:
+                    MTThemeFeatureAppIcons]
+                isEqualToString:[current
+                    sourceThemeIdentifierForFeatureIdentifier:
+                        MTThemeFeatureAppIcons]];
         if (![self.componentSelectionStore saveMixSelection:updated
-                                                      error:&selectionError]) {
+            preservingStoredAppIconFallbacks:fallbackIntentUnchanged
+            error:&selectionError]) {
             if (completion != nil) completion(NO, selectionError);
             return;
         }
@@ -1152,9 +1148,17 @@ static BOOL MTManagerThemeSupportsFeature(
         BOOL knownFeature = MTThemeFeatureSupportsMixing(featureIdentifier);
         NSString *sourceIdentifier = [selection
             sourceThemeIdentifierForFeatureIdentifier:featureIdentifier];
-        if (!knownFeature || (enabled &&
-            !MTManagerThemeSupportsFeature(
-                self.snapshot, sourceIdentifier, featureIdentifier))) {
+        BOOL sourceAvailable = MTManagerThemeSupportsFeature(
+            self.snapshot, sourceIdentifier, featureIdentifier);
+        if (enabled &&
+            [featureIdentifier isEqualToString:MTThemeFeatureAppIcons]) {
+            for (NSString *themeIdentifier in
+                    selection.appIconThemeIdentifiersInPriorityOrder) {
+                sourceAvailable = sourceAvailable || MTManagerThemeSupportsFeature(
+                    self.snapshot, themeIdentifier, MTThemeFeatureAppIcons);
+            }
+        }
+        if (!knownFeature || (enabled && !sourceAvailable)) {
             if (error != NULL) *error = MTManagerError(
                 MTManagerControllerErrorInvalidSelection,
                 @"Choose a theme that supports this feature before enabling it.");
@@ -1194,6 +1198,36 @@ static BOOL MTManagerThemeSupportsFeature(
         return [updated selectionBySettingFeatureIdentifier:featureIdentifier
                                                      enabled:YES
                                                        error:error];
+    } completion:completion];
+}
+
+- (void)setAppIconFallbackThemeIdentifier:
+        (NSString *)fallbackThemeIdentifier
+                                        atIndex:(NSUInteger)index
+                         baseThemeIdentifier:(NSString *)baseThemeIdentifier
+                                   completion:
+                                       (MTManagerOperationCompletion)completion {
+    [self updateMixSelectionForBaseThemeIdentifier:baseThemeIdentifier
+        mutation:^MTThemeMixSelection *(
+            MTThemeMixSelection *selection,
+            NSDictionary<NSString *,NSString *> *revisions,
+            NSDictionary<NSString *,MTThemeComponentSelection *> *components,
+            NSError **error) {
+        if (fallbackThemeIdentifier != nil &&
+            !MTManagerThemeSupportsFeature(self.snapshot,
+                fallbackThemeIdentifier, MTThemeFeatureAppIcons)) {
+            if (error != NULL) *error = MTManagerError(
+                MTManagerControllerErrorInvalidSelection,
+                @"The selected fallback theme does not provide App icons.");
+            return nil;
+        }
+        return [selection
+            selectionBySettingAppIconFallbackThemeIdentifier:
+                fallbackThemeIdentifier
+            atIndex:index
+            revisionIdentifiersByThemeIdentifier:revisions
+            componentSelectionsByThemeIdentifier:components
+            error:error];
     } completion:completion];
 }
 
@@ -1256,7 +1290,7 @@ static BOOL MTManagerThemeSupportsFeature(
     if (selection.length > 0 &&
         (componentSelection == nil || mixSelection == nil)) {
         if (completion != nil) {
-            completion(NO, NO, MTManagerError(
+            completion(NO, MTManagerError(
                 MTManagerControllerErrorInvalidSelection,
                 @"The selected theme has no valid component configuration."));
         }
@@ -1264,7 +1298,6 @@ static BOOL MTManagerThemeSupportsFeature(
     }
     MTManagerOperation operation = selection.length > 0
         ? MTManagerOperationApplying : MTManagerOperationDisabling;
-    __block BOOL reloadRequired = NO;
     __weak typeof(self) weakSelf = self;
     [self performOperation:operation mutation:^BOOL(NSError **error) {
         typeof(self) self = weakSelf;
@@ -1313,34 +1346,54 @@ static BOOL MTManagerThemeSupportsFeature(
                       recordError.localizedDescription);
             }
         }
-        reloadRequired = result != nil && !result.runtimeAcknowledged;
         return result != nil;
     } refreshLibraryAfterMutation:NO
       completion:^(BOOL success, NSError *error) {
         if (completion != nil) {
-            completion(success, success && reloadRequired, error);
+            completion(success, error);
         }
     }];
 }
 
-- (void)reloadDesktopWithCompletion:
+- (void)requestRespringWithCompletion:
         (MTManagerOperationCompletion)completion {
     __weak typeof(self) weakSelf = self;
-    [self performOperation:MTManagerOperationReloadingDesktop
+    [self performOperation:MTManagerOperationRespringing
                   mutation:^BOOL(NSError **error) {
         typeof(self) self = weakSelf;
         if (self.runtimeClient == nil) {
             if (error != NULL) *error = MTManagerError(
                 MTManagerControllerErrorUnavailable,
-                @"Desktop reload is unavailable on this platform.");
+                @"Respring is unavailable on this platform.");
             return NO;
         }
-        return [self.runtimeClient reloadDesktopWithError:error];
+        return [self.runtimeClient requestRespringWithError:error];
     } refreshLibraryAfterMutation:NO completion:completion];
 }
 
 - (void)rollbackRuntimeWithCompletion:
         (MTManagerOperationCompletion)completion {
+    if (!NSThread.isMainThread) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf rollbackRuntimeWithCompletion:completion];
+        });
+        return;
+    }
+    // Capture one exact rollback destination before leaving the main queue.
+    // The Helper's raw rollback operation is intentionally toggle-shaped;
+    // activating the captured immutable Generation keeps this App request
+    // deterministic even if another control plane advances state meanwhile.
+    NSString *targetGenerationIdentifier =
+        [self.snapshot.previousGenerationIdentifier copy];
+    if (targetGenerationIdentifier.length == 0) {
+        if (completion != nil) {
+            completion(NO, MTManagerError(
+                MTManagerControllerErrorInvalidSelection,
+                @"No previous Runtime Generation is available."));
+        }
+        return;
+    }
     __weak typeof(self) weakSelf = self;
     [self performOperation:MTManagerOperationRollingBack
                   mutation:^BOOL(NSError **error) {
@@ -1351,55 +1404,13 @@ static BOOL MTManagerThemeSupportsFeature(
                 @"Runtime rollback is unavailable on this platform.");
             return NO;
         }
-        return [self.runtimeClient rollbackWithError:error] != nil;
-    } refreshLibraryAfterMutation:NO completion:completion];
-}
-
-- (void)loadRevisionHistoryForThemeIdentifier:(NSString *)themeIdentifier
-    completion:(MTManagerRevisionHistoryCompletion)completion {
-    NSParameterAssert(completion != nil);
-    void (^historyBlock)(void) = ^{
-        MTThemeLibraryThemeSummary *theme = [self.snapshot
-            themeWithIdentifier:themeIdentifier];
-        if (theme == nil) {
-            completion(nil, MTManagerError(
-                MTManagerControllerErrorInvalidSelection,
-                @"The requested theme is absent from the Manager Library snapshot."));
-            return;
-        }
-        completion(theme.revisionHistory, nil);
-    };
-    if (NSThread.isMainThread) {
-        historyBlock();
-    } else {
-        dispatch_async(dispatch_get_main_queue(), historyBlock);
-    }
-}
-
-- (void)switchThemeIdentifier:(NSString *)themeIdentifier
-           toRevisionIdentifier:(NSString *)revisionIdentifier
-                     completion:(MTManagerOperationCompletion)completion {
-    MTThemeLibraryStore *store = self.libraryStore;
-    [self performOperation:MTManagerOperationSwitchingRevision
-                  mutation:^BOOL(NSError **error) {
-        return [store switchCurrentRevisionForThemeID:themeIdentifier
-            revisionIdentifier:revisionIdentifier
-            cancellationToken:nil
-            error:error] != nil;
-    } refreshLibraryAfterMutation:YES completion:completion];
-}
-
-- (void)removeRevisionIdentifier:(NSString *)revisionIdentifier
-              fromThemeIdentifier:(NSString *)themeIdentifier
-                        completion:(MTManagerOperationCompletion)completion {
-    MTThemeLibraryStore *store = self.libraryStore;
-    [self performOperation:MTManagerOperationRemovingRevision
-                  mutation:^BOOL(NSError **error) {
-        return [store removeRevisionForThemeID:themeIdentifier
-            revisionIdentifier:revisionIdentifier
-            cancellationToken:nil
+        MTRuntimeState *state = [self.runtimeClient
+            activateGenerationWithIdentifier:targetGenerationIdentifier
             error:error];
-    } refreshLibraryAfterMutation:YES completion:completion];
+        return state != nil && state.isRuntimeEnabled &&
+            [state.activeGenerationIdentifier
+                isEqualToString:targetGenerationIdentifier];
+    } refreshLibraryAfterMutation:NO completion:completion];
 }
 
 - (void)removeThemeIdentifier:(NSString *)themeIdentifier
@@ -1421,17 +1432,11 @@ static BOOL MTManagerThemeSupportsFeature(
         }
         return;
     }
-    if ([self.snapshot runtimeUsesThemeIdentifier:themeIdentifier]) {
-        if (completion != nil) {
-            completion(NO, MTManagerError(
-                MTManagerControllerErrorInvalidSelection,
-                @"A theme used by the active mix must be replaced or disabled before deletion."));
-        }
-        return;
-    }
-    // A deleted theme can no longer be the selection. Fall back to the stock
-    // theme before the mutation so the refreshed snapshot cannot carry an
-    // identifier that no longer exists in the Library.
+    // Runtime Generations are immutable and own their verified asset copies.
+    // Library deletion therefore cannot invalidate the Generation currently
+    // selected by Runtime, including one composed from several source themes.
+    // The deleted theme can no longer remain a Library selection, so fall back
+    // to the stock preview before refreshing the catalog.
     if ([self.snapshot.selectedThemeIdentifier
             isEqualToString:themeIdentifier]) {
         [self selectThemeIdentifier:nil];

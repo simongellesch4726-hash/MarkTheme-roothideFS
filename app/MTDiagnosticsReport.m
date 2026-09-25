@@ -3,9 +3,39 @@
 #import "MTBootstrapPaths.h"
 #import "MTImportDiagnostics.h"
 
+#if !defined(MARKTHEME_RUNTIME_BUILD_NUMBER)
+#error "MARKTHEME_RUNTIME_BUILD_NUMBER must identify current diagnostics"
+#endif
+
+static const NSUInteger MTDiagnosticsExpectedReportSchema = 3;
+static const NSUInteger MTDiagnosticsExpectedObservationSchema = 8;
+
+NSArray<NSString *> *MTDiagnosticsExpectedProfileIdentifiers(void) {
+    return @[
+        @"mobilephone.dialer",
+        @"photos.share-sheet.ui-icons",
+        @"preferences.ui-icons",
+        @"share-sheet.loaded-host.ui-icons",
+        @"share-sheet.ui-icons",
+        @"sharingd.share-sheet.ui-icons",
+        @"spotlight.application-icons",
+        @"springboard.icons",
+    ];
+}
+
 static NSURL *MTDiagnosticsDirectoryURL(void) {
     return [MTDefaultManagerDataRootURL()
         URLByAppendingPathComponent:@"Diagnostics" isDirectory:YES];
+}
+
+static BOOL MTDiagnosticsReportIsCurrent(
+    NSDictionary<NSString *, id> *report) {
+    return [report[@"schemaVersion"] unsignedIntegerValue] ==
+            MTDiagnosticsExpectedReportSchema &&
+        [report[@"runtimeBuild"] unsignedIntegerValue] ==
+            MARKTHEME_RUNTIME_BUILD_NUMBER &&
+        [report[@"observationSchema"] unsignedIntegerValue] ==
+            MTDiagnosticsExpectedObservationSchema;
 }
 
 static void MTAppendContracts(
@@ -79,8 +109,50 @@ static NSString *MTDiagnosticValueText(id value) {
 }
 
 static NSString *MTObservationGroupName(NSString *compactID) {
-    if ([compactID isEqualToString:@"icon"]) {
-        return @"springboard.icon-image-cache";
+    if ([compactID isEqualToString:@"notificationSource"]) {
+        return @"springboard.notification-icon-source";
+    }
+    if ([compactID isEqualToString:@"calendar"]) {
+        return @"springboard.calendar-appearance";
+    }
+    if ([compactID isEqualToString:@"calendarSource"]) {
+        return @"calendar-ui-kit.dynamic-icon-source";
+    }
+    if ([compactID isEqualToString:@"calendarRender"]) {
+        return @"calendar-icons.renderer";
+    }
+    if ([compactID isEqualToString:@"clockSource"]) {
+        return @"springboard-home.clock-icon-sources";
+    }
+    if ([compactID isEqualToString:@"clock"]) {
+        return @"clock-icons.snapshot";
+    }
+    if ([compactID isEqualToString:@"dialerSource"]) {
+        return @"mobilephone.dialer-buttons";
+    }
+    if ([compactID isEqualToString:@"dialer"]) {
+        return @"dialer.snapshot";
+    }
+    if ([compactID isEqualToString:@"folderSource"]) {
+        return @"springboard-home.folder-icon-source";
+    }
+    if ([compactID isEqualToString:@"badgeSource"]) {
+        return @"springboard-home.badge-source";
+    }
+    if ([compactID isEqualToString:@"preferencesSource"]) {
+        return @"preferences.ui-resource-image";
+    }
+    if ([compactID isEqualToString:@"searchCalendar"]) {
+        return @"spotlight.calendar-appearance";
+    }
+    if ([compactID isEqualToString:@"shareGlyph"]) {
+        return @"share-sheet.activity-glyph";
+    }
+    if ([compactID isEqualToString:@"statusBarSource"]) {
+        return @"springboard.statusbar-signal-image";
+    }
+    if ([compactID isEqualToString:@"statusBar"]) {
+        return @"statusbar.snapshot";
     }
     if ([compactID isEqualToString:@"static"]) {
         return @"static-icons.snapshot";
@@ -94,81 +166,171 @@ static NSString *MTObservationGroupName(NSString *compactID) {
     if ([compactID isEqualToString:@"overlayDebug"]) {
         return @"icon-overlay.debug";
     }
-    if ([compactID isEqualToString:@"desktop"]) {
-        return @"springboard.desktop-icon-display";
-    }
     if ([compactID isEqualToString:@"view"]) {
         return @"springboard.icon-shadow";
     }
-    if ([compactID isEqualToString:@"notification"]) {
-        return @"springboard.notification-icon";
+    if ([compactID isEqualToString:@"shadowCarrier"]) {
+        return @"springboard-home.icon-shadow-carrier";
+    }
+    if ([compactID isEqualToString:@"shadow"]) {
+        return @"icon-shadow.snapshot";
+    }
+    if ([compactID isEqualToString:@"morph"]) {
+        return @"springboard.icon-morph-carrier";
+    }
+    if ([compactID isEqualToString:@"folder"]) {
+        return @"folder-icons.snapshot";
+    }
+    if ([compactID isEqualToString:@"badge"]) {
+        return @"badges.snapshot";
+    }
+    if ([compactID isEqualToString:@"uiResources"]) {
+        return @"ui-resources.snapshot";
     }
     return compactID;
 }
 
 static NSArray<NSString *> *MTObservationLabels(NSString *compactID,
                                                 NSUInteger schema) {
-    if ([compactID isEqualToString:@"icon"]) {
+    if ([compactID isEqualToString:@"notificationSource"]) {
         return @[
-            @"state", @"totalCalls", @"identityStringResults",
-            @"resolverCalls", @"replacementResults", @"transitionCalls",
-            @"transitionReplacements", @"morphPrepareCalls",
-            @"morphProxyActivations", @"morphFadeSynchronizations",
-            @"morphCleanups", @"squareMaskCompositions",
-            @"cacheRequestCalls",
-            @"cacheRequestRecipients", @"viewRecipientRecords",
-            @"refreshRequests", @"refreshExecutions",
-            @"refreshCachePurges", @"refreshIconPurges",
-            @"refreshObserverNotifications", @"refreshNativeRecaches",
+            @"state", @"installAttempts", @"totalCalls",
+            @"identityResults", @"resolverCalls",
+            @"replacementResults", @"mappedCacheClears",
+            @"contractRejects",
         ];
     }
-    if ([compactID isEqualToString:@"notification"]) {
+    if ([compactID isEqualToString:@"calendar"]) {
         return @[
-            @"state", @"totalCalls", @"identityResults",
-            @"replacementResults",
+            @"installed", @"generatedCalls", @"appearanceReplacements",
         ];
     }
-    if ([compactID isEqualToString:@"desktop"]) {
+    if ([compactID isEqualToString:@"calendarSource"]) {
         return @[
-            @"contentsCalls", @"displayCalls",
-            @"displayStationaryRealCalls", @"identityMisses",
-            @"resolverCalls", @"alreadyCurrentResults",
-            @"replacementResults", @"resolverMisses",
+            @"state", @"calls", @"outOfScopeCalls",
+            @"originalFailures", @"resolverMisses", @"rasterRejects",
+            @"replacements",
+        ];
+    }
+    if ([compactID isEqualToString:@"calendarRender"]) {
+        return @[
+            @"renderAttempts", @"renderSuccesses", @"renderFailures",
+        ];
+    }
+    if ([compactID isEqualToString:@"clockSource"]) {
+        return @[
+            @"state", @"faceSourceCalls", @"maskedFaceCalls",
+            @"unmaskedFaceCalls", @"themedFaces", @"handSourceCalls",
+            @"themedHandSets", @"originalFailures", @"resolverMisses",
+            @"contractRejects",
+        ];
+    }
+    if ([compactID isEqualToString:@"clock"]) {
+        return @[
+            @"state", @"resourceRequests", @"resourceHits",
+            @"decodeSuccesses", @"decodeFailures", @"imageSetPublishes",
+            @"componentMatchRequests", @"componentMatchResults",
+        ];
+    }
+    if ([compactID isEqualToString:@"dialerSource"]) {
+        return @[
+            @"state", @"installAttempts", @"numberSourceCalls",
+            @"numberNormalCalls", @"numberHighlightedCalls",
+            @"circleAlphaCalls", @"circleSuppressions",
+            @"callButtonCreations", @"callNormalReplacements",
+            @"callOverlayRequests", @"callPressedReplacements",
+            @"resolverMisses", @"contractRejects",
+        ];
+    }
+    if ([compactID isEqualToString:@"dialer"]) {
+        return @[
+            @"state", @"imageRequests",
+            @"contractRejects", @"resourceHits", @"cacheHits",
+            @"decodeSuccesses", @"decodeFailures",
+            @"replacementResults", @"completeSetChecks",
+            @"completeSetPasses",
+        ];
+    }
+    if ([compactID isEqualToString:@"folderSource"]) {
+        return @[
+            @"state", @"sourceCalls", @"nativeBackgroundCalls",
+            @"nilBackgroundCalls", @"themedBackgrounds",
+            @"overlayActivations", @"nativeFallbacks",
+            @"contractRejects",
+        ];
+    }
+    if ([compactID isEqualToString:@"badgeSource"]) {
+        return @[
+            @"state", @"installAttempts", @"sourceCalls",
+            @"mainThreadCalls", @"nativeBackgroundCalls",
+            @"themedBackgrounds", @"nativeFallbacks",
+            @"contractRejects",
+        ];
+    }
+    if ([compactID isEqualToString:@"preferencesSource"]) {
+        return @[
+            @"state", @"installAttempts", @"totalCalls", @"stringKeys",
+            @"nilOriginalResults", @"replacementResults",
+        ];
+    }
+    if ([compactID isEqualToString:@"searchCalendar"]) {
+        return @[
+            @"state", @"calls", @"replacements", @"trackedImages",
+            @"refreshRequests", @"refreshInvalidations",
+        ];
+    }
+    if ([compactID isEqualToString:@"shareGlyph"]) {
+        if (schema <= 4) {
+            return @[
+                @"state", @"calls", @"applicationActivitiesPreserved",
+                @"customActivityIdentities", @"replacements",
+                @"nativeApplicationBridgeRequests",
+                @"nativeApplicationBridgeResults",
+                @"providerRequestsTracked",
+            ];
+        }
+        return @[
+            @"state", @"installAttempts", @"requestCalls",
+            @"deliveryCalls", @"applicationContexts",
+            @"customContexts", @"nativeApplicationBridgeResults",
+            @"replacements", @"providersTracked", @"contextMisses",
+            @"contractRejects",
+        ];
+    }
+    if ([compactID isEqualToString:@"statusBarSource"]) {
+        return @[
+            @"state", @"installAttempts", @"wifiCommitCalls",
+            @"cellularCommitCalls", @"mainThreadCalls",
+            @"resolverCalls", @"appliedResults", @"stockFallbacks",
+            @"contractRejects",
+        ];
+    }
+    if ([compactID isEqualToString:@"statusBar"]) {
+        return @[
+            @"state", @"nativeCommitRequests",
+            @"contextRequests", @"contextMisses", @"resourceHits",
+            @"cacheHits", @"decodeSuccesses", @"decodeFailures",
+            @"replacementResults", @"stockRestores",
         ];
     }
     if ([compactID isEqualToString:@"static"]) {
         return @[
             @"state", @"lookupCalls", @"unsupportedOriginalMisses",
             @"snapshotMisses", @"resourceHits", @"cacheHits",
-            @"decodeScheduled", @"decodeSuccesses", @"decodeFailures",
+            @"decodeAttempts", @"decodeSuccesses", @"decodeFailures",
         ];
     }
     if ([compactID isEqualToString:@"mask"]) {
-        if (schema == 1) {
-            return @[
-                @"state", @"reloads", @"decodeSuccesses", @"decodeFailures",
-                @"resolutionCalls", @"unsupportedCandidateMisses",
-                @"compositions",
-            ];
-        }
         return @[
-            @"state", @"reloads", @"decodeSuccesses", @"decodeFailures",
+            @"state", @"decodeSuccesses", @"decodeFailures",
             @"resolutionCalls", @"unsupportedCandidateMisses",
             @"cacheHits", @"compositions", @"memoryPressurePurges",
             @"cacheEvictions",
         ];
     }
     if ([compactID isEqualToString:@"overlay"]) {
-        if (schema == 1) {
-            return @[
-                @"state", @"reloads", @"overlayResourceHits",
-                @"decodeSuccesses", @"decodeFailures", @"resolutionCalls",
-                @"unsupportedCandidateMisses", @"alreadyProcessedHits",
-                @"compositions",
-            ];
-        }
         return @[
-            @"state", @"reloads", @"overlayResourceHits",
+            @"state", @"overlayResourceHits",
             @"decodeSuccesses", @"decodeFailures", @"resolutionCalls",
             @"unsupportedCandidateMisses", @"alreadyProcessedHits",
             @"cacheHits", @"compositions", @"memoryPressurePurges",
@@ -187,73 +349,63 @@ static NSArray<NSString *> *MTObservationLabels(NSString *compactID,
             @"state", @"configureCalls", @"imageInfoCalls",
             @"resolverCalls", @"appliedResults", @"refreshRequests",
             @"refreshExecutions",
+            @"applicationIconRefreshRequests",
+            @"applicationIconCachePurges",
+            @"applicationIconObserverSignals",
+            @"applicationIconRefreshFailures",
+        ];
+    }
+    if ([compactID isEqualToString:@"shadowCarrier"]) {
+        return @[
+            @"state", @"installAttempts", @"layoutCalls", @"reuseCalls",
+            @"mainThreadCalls", @"folderExclusions", @"resolverCalls",
+            @"appliedResults", @"cleanupCalls", @"contractRejects",
+        ];
+    }
+    if ([compactID isEqualToString:@"shadow"]) {
+        return @[
+            @"state", @"preparationAttempts", @"resourceHits",
+            @"decodeSuccesses", @"decodeFailures", @"carrierResolutions",
+            @"attachmentsCreated", @"attachmentUpdates",
+            @"attachmentsRemoved", @"contextMisses",
+        ];
+    }
+    if ([compactID isEqualToString:@"morph"]) {
+        return @[
+            @"state", @"squareContentsCalls",
+            @"eligibleCarriers", @"prepareCalls", @"proxyActivations",
+            @"fadeSynchronizations", @"cleanups",
+        ];
+    }
+    if ([compactID isEqualToString:@"folder"]) {
+        return @[
+            @"state", @"baseResourceHits",
+            @"lightResourceHits", @"decodeSuccesses", @"decodeFailures",
+            @"backgroundResolutions", @"backgroundReplacements",
+            @"overlayActivations",
+        ];
+    }
+    if ([compactID isEqualToString:@"badge"]) {
+        return @[
+            @"state", @"lightResourceHits",
+            @"darkResourceHits", @"decodeSuccesses", @"decodeFailures",
+            @"nativeSourceResolutions", @"appearanceSelections",
+            @"themedBackgrounds", @"nativeFallbacks",
+        ];
+    }
+    if ([compactID isEqualToString:@"uiResources"]) {
+        return @[
+            @"state", @"lookupCalls", @"snapshotMisses",
+            @"resourceHits", @"cacheHits", @"decodeSuccesses",
+            @"decodeFailures", @"replacementResults",
+            @"memoryPressurePurges",
         ];
     }
     return @[];
 }
 
-static uint64_t MTCompactObservationValue(NSArray *values,
-                                          NSUInteger index) {
-    if (![values isKindOfClass:NSArray.class] || index >= values.count) {
-        return 0;
-    }
-    id value = values[index];
-    return [value respondsToSelector:@selector(unsignedLongLongValue)]
-        ? [value unsignedLongLongValue] : 0;
-}
-
-static void MTAppendDesktopOverlayDiagnosis(
-    NSMutableString *text,
-    NSDictionary<NSString *, id> *observations) {
-    NSArray *desktop = [observations[@"desktop"]
-        isKindOfClass:NSArray.class] ? observations[@"desktop"] : nil;
-    if (desktop.count != 8) return;
-    NSArray *overlay = [observations[@"overlay"]
-        isKindOfClass:NSArray.class] ? observations[@"overlay"] : nil;
-    uint64_t contentsCalls = MTCompactObservationValue(desktop, 0);
-    uint64_t displayCalls = MTCompactObservationValue(desktop, 1);
-    uint64_t displayStationaryReal = MTCompactObservationValue(desktop, 2);
-    uint64_t identityMisses = MTCompactObservationValue(desktop, 3);
-    uint64_t resolverCalls = MTCompactObservationValue(desktop, 4);
-    uint64_t alreadyCurrent = MTCompactObservationValue(desktop, 5);
-    uint64_t replacements = MTCompactObservationValue(desktop, 6);
-    uint64_t overlayState = MTCompactObservationValue(overlay, 0);
-    NSString *diagnosis = nil;
-    if (contentsCalls == 0 && displayCalls == 0) {
-        diagnosis = @"No final SBIconImageView callback was observed; "
-            "the desktop hook was not reached.";
-    } else if (displayStationaryReal > 0 && contentsCalls == 0) {
-        diagnosis = @"Stationary real-image updates were observed, but "
-            "contentsImage never ran; the desktop committed through another "
-            "boundary.";
-    } else if (resolverCalls == 0 && identityMisses > 0) {
-        diagnosis = @"The desktop hook ran, but no application bundle "
-            "identifier was resolved.";
-    } else if (overlayState != 2) {
-        diagnosis = @"The desktop resolver ran without a Ready overlay image "
-            "set; inspect icon-overlay.image-set.";
-    } else if (resolverCalls > 0 && replacements == 0 &&
-               alreadyCurrent == 0) {
-        diagnosis = @"The desktop resolver rejected every candidate; inspect "
-            "icon-overlay.debug and icon-overlay.failure.*.";
-    } else if (replacements > 0) {
-        diagnosis = @"MarkTheme returned replacement pixels at the desktop "
-            "boundary. If the icon is still stock, a later system write "
-            "overwrote them.";
-    } else if (alreadyCurrent > 0) {
-        diagnosis = @"The desktop candidate already carried the current "
-            "overlay when the final boundary inspected it.";
-    } else {
-        diagnosis = @"Desktop callbacks were observed; inspect the counters "
-            "and samples below for the first divergent stage.";
-    }
-    [text appendFormat:@"desktopOverlayDiagnosis: %@\n", diagnosis];
-}
-
 static NSString *MTTextForReport(NSDictionary<NSString *, id> *report) {
     NSMutableString *text = [NSMutableString string];
-    BOOL isDesktopProfile = [report[@"profile"]
-        isEqualToString:@"springboard.icons"];
     [text appendFormat:@"profile: %@\n", report[@"profile"] ?: @"?"];
     [text appendFormat:@"process: %@\n", report[@"process"] ?: @"?"];
     [text appendFormat:@"runtimeBuild: %@\n",
@@ -305,18 +457,10 @@ static NSString *MTTextForReport(NSDictionary<NSString *, id> *report) {
     }
 
     NSDictionary<NSString *, id> *observations = report[@"observations"];
-    if (isDesktopProfile &&
-        [observations isKindOfClass:NSDictionary.class]) {
-        MTAppendDesktopOverlayDiagnosis(text, observations);
-    }
     if ([observations isKindOfClass:NSDictionary.class] &&
         observations.count > 0) {
         for (NSString *groupID in [observations.allKeys
                 sortedArrayUsingSelector:@selector(compare:)]) {
-            if (!isDesktopProfile &&
-                [groupID isEqualToString:@"desktop"]) {
-                continue;
-            }
             id values = observations[groupID];
             [text appendFormat:@"observation: %@\n",
                 MTObservationGroupName(groupID)];
@@ -324,7 +468,7 @@ static NSString *MTTextForReport(NSDictionary<NSString *, id> *report) {
                 [report[@"observationSchema"] unsignedIntegerValue];
             NSArray<NSString *> *labels = MTObservationLabels(
                 groupID, observationSchema);
-            if ((observationSchema == 1 || observationSchema == 2) &&
+            if (observationSchema >= 1 && observationSchema <= 8 &&
                 [values isKindOfClass:NSArray.class] &&
                 labels.count == [(NSArray *)values count]) {
                 NSArray *compactValues = values;
@@ -379,10 +523,14 @@ NSString *MTDiagnosticsReportText(void) {
     NSURL *directory = MTDiagnosticsDirectoryURL();
     NSMutableString *text = [NSMutableString string];
     [text appendString:@"MarkTheme diagnostics\n"];
-    [text appendFormat:@"appVersion: %@ (%@)\nos: %@\n\n%@",
+    [text appendFormat:@"appVersion: %@ (%@)\nos: %@\n"
+                       "expectedRuntimeBuild: %u\n"
+                       "expectedObservationSchema: %lu\n\n%@",
         NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?",
         NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"] ?: @"?",
         NSProcessInfo.processInfo.operatingSystemVersionString ?: @"?",
+        (unsigned int)MARKTHEME_RUNTIME_BUILD_NUMBER,
+        (unsigned long)MTDiagnosticsExpectedObservationSchema,
         MTImportDiagnosticsText()];
 
     NSArray<NSURL *> *files = directory == nil ? nil :
@@ -391,16 +539,14 @@ NSString *MTDiagnosticsReportText(void) {
           includingPropertiesForKeys:nil
                              options:NSDirectoryEnumerationSkipsHiddenFiles
                                error:NULL];
-    if (files.count == 0) {
-        [text appendString:@"\nNo runtime report yet.\n"
-             "Apply a theme, respring, then reopen this page."];
-        return text;
-    }
-
     NSArray<NSURL *> *sorted = [files sortedArrayUsingComparator:
         ^NSComparisonResult(NSURL *lhs, NSURL *rhs) {
-        return [lhs.lastPathComponent compare:rhs.lastPathComponent];
+            return [lhs.lastPathComponent compare:rhs.lastPathComponent];
     }];
+    NSMutableArray<NSDictionary<NSString *, id> *> *currentReports =
+        [NSMutableArray array];
+    NSMutableArray<NSDictionary<NSString *, id> *> *staleReports =
+        [NSMutableArray array];
     for (NSURL *file in sorted) {
         if (![file.pathExtension isEqualToString:@"json"]) continue;
         NSData *data = [NSData dataWithContentsOfURL:file];
@@ -410,6 +556,59 @@ NSString *MTDiagnosticsReportText(void) {
                                                       error:NULL];
         if (![object isKindOfClass:NSDictionary.class]) continue;
         NSDictionary<NSString *, id> *report = object;
+        NSDictionary<NSString *, id> *entry = @{
+            @"file" : file.lastPathComponent ?: @"unknown.json",
+            @"report" : report,
+        };
+        NSMutableArray<NSDictionary<NSString *, id> *> *destination =
+            MTDiagnosticsReportIsCurrent(report)
+                ? currentReports : staleReports;
+        [destination addObject:entry];
+    }
+
+    NSArray<NSString *> *expectedProfileIDs =
+        MTDiagnosticsExpectedProfileIdentifiers();
+    NSSet<NSString *> *expectedProfileIDSet =
+        [NSSet setWithArray:expectedProfileIDs];
+    NSMutableSet<NSString *> *currentProfileIDs = [NSMutableSet set];
+    NSMutableSet<NSString *> *unexpectedProfileIDs = [NSMutableSet set];
+    for (NSDictionary<NSString *, id> *entry in currentReports) {
+        NSDictionary<NSString *, id> *report = entry[@"report"];
+        NSString *profile = [report[@"profile"] isKindOfClass:NSString.class]
+            ? report[@"profile"] : nil;
+        if (profile.length == 0) continue;
+        NSMutableSet<NSString *> *destination =
+            [expectedProfileIDSet containsObject:profile]
+                ? currentProfileIDs : unexpectedProfileIDs;
+        [destination addObject:profile];
+    }
+    NSMutableArray<NSString *> *missingProfileIDs = [NSMutableArray array];
+    for (NSString *profile in expectedProfileIDs) {
+        if (![currentProfileIDs containsObject:profile]) {
+            [missingProfileIDs addObject:profile];
+        }
+    }
+    [text appendFormat:@"\ncurrentRuntimeReports: %lu/%lu\n",
+        (unsigned long)currentProfileIDs.count,
+        (unsigned long)expectedProfileIDs.count];
+    [text appendFormat:@"missingCurrentProfiles: %@\n",
+        missingProfileIDs.count == 0
+            ? @"none"
+            : [missingProfileIDs componentsJoinedByString:@", "]];
+    if (unexpectedProfileIDs.count > 0) {
+        NSArray<NSString *> *unexpected = [unexpectedProfileIDs.allObjects
+            sortedArrayUsingSelector:@selector(compare:)];
+        [text appendFormat:@"unexpectedCurrentProfiles: %@\n",
+            [unexpected componentsJoinedByString:@", "]];
+    }
+
+    if (currentReports.count == 0) {
+        [text appendString:@"\nNo current Runtime report yet.\n"
+             "Apply a theme, Respring once, exercise the target surfaces, "
+             "then reopen this page.\n"];
+    }
+    for (NSDictionary<NSString *, id> *entry in currentReports) {
+        NSDictionary<NSString *, id> *report = entry[@"report"];
         // The OS and hardware are identical across reports; print them once,
         // taken from the report itself so they describe the host process that
         // actually probed the ABI rather than this app.
@@ -419,6 +618,18 @@ NSString *MTDiagnosticsReportText(void) {
         }
         [text appendString:@"\n"];
         [text appendString:MTTextForReport(report)];
+    }
+    if (staleReports.count > 0) {
+        [text appendFormat:@"\nstaleReports: %lu (not expanded)\n",
+            (unsigned long)staleReports.count];
+        for (NSDictionary<NSString *, id> *entry in staleReports) {
+            NSDictionary<NSString *, id> *report = entry[@"report"];
+            [text appendFormat:@"  %@: runtimeBuild=%@ "
+                               "reportSchema=%@ observationSchema=%@\n",
+                entry[@"file"], report[@"runtimeBuild"] ?: @"legacy",
+                report[@"schemaVersion"] ?: @"legacy",
+                report[@"observationSchema"] ?: @"legacy"];
+        }
     }
     return text;
 }

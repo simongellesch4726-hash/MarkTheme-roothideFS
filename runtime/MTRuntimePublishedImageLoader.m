@@ -186,7 +186,7 @@ static void MTRuntimePublishedImageLoaderSetError(
     }
     NSError *resourceError = nil;
     NSData *data = [generation
-        verifiedAssetDataForResource:resource
+        assetDataForResource:resource
         maximumByteCount:self.maximumEncodedByteCount
         error:&resourceError];
     if (data == nil) {
@@ -195,7 +195,7 @@ static void MTRuntimePublishedImageLoaderSetError(
                 ? MTRuntimePublishedImageLoaderErrorLimitExceeded
                 : MTRuntimePublishedImageLoaderErrorResourceRejected;
         MTRuntimePublishedImageLoaderSetError(error, code,
-            @"Published image bytes failed the immutable Generation boundary.",
+            @"Published image bytes failed the Runtime Generation boundary.",
             resourceError);
         return nil;
     }
@@ -329,14 +329,15 @@ static void MTRuntimePublishedImageLoaderSetError(
         (__bridge NSString *)kCGImageSourceShouldCacheImmediately : @YES,
         (__bridge NSString *)kCGImageSourceShouldAllowFloat : @NO,
     };
-    CGImageRef decodedImage = exactDimensions || canLegacyTwoToThreeUpscale ||
-        boundedSourceFitsTarget
+    CGImageRef decodedImage = exactDimensions ||
+        canLegacyTwoToThreeUpscale || boundedSourceFitsTarget
         ? CGImageSourceCreateImageAtIndex(
             source, 0, (__bridge CFDictionaryRef)decodeOptions)
         : CGImageSourceCreateThumbnailAtIndex(
             source, 0, (__bridge CFDictionaryRef)decodeOptions);
     CGImageRef image = decodedImage;
-    if (decodedImage != NULL && canBoundedScaleToFill && !exactDimensions) {
+    if (decodedImage != NULL && canBoundedScaleToFill &&
+               !exactDimensions) {
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
         size_t bytesPerRow = (size_t)targetPixelWidth * 4;
         CGContextRef context = colorSpace == NULL ? NULL :

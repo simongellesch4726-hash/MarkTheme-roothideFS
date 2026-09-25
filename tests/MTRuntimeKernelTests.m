@@ -157,6 +157,16 @@ NSUInteger MTRunRuntimeKernelTests(void) {
         MTRuntimeSnapshot.stockSnapshot.state.sequence == 0,
         @"A fresh Runtime snapshot must be canonical stock");
 
+    MTRuntimeKernel *staticKernel = [[MTRuntimeKernel alloc]
+        initWithSnapshot:snapshotA];
+    NSError *staticError = nil;
+    MTRuntimeKernelAssert(!staticKernel.isRunning &&
+        staticKernel.currentSnapshot == snapshotA &&
+        [staticKernel resourceForCanonicalResourceKey:@"test-key"
+                                                error:&staticError] ==
+            (id)resource && staticError == nil,
+        @"Display Runtime must use one immutable startup snapshot without a reload queue");
+
     MTTestRuntimeLoader *synchronousLoader =
         [[MTTestRuntimeLoader alloc] init];
     synchronousLoader.results = @[ snapshotA ];
@@ -298,19 +308,16 @@ NSUInteger MTRunRuntimeKernelTests(void) {
         !burstKernel.isRunning,
         @"A stopped Runtime Kernel must ignore further invalidation requests");
 
-    (void)MTRuntimePostInvalidation();
-    MTRuntimeKernelAssert(
-        [MTRuntimeInvalidationNotificationName isEqualToString:
-            @"com.hmmzzz.marktheme.runtime-store-changed"],
-        @"Runtime invalidation must use one stable best-effort Darwin name");
-    NSString *expectedAcknowledgement = [NSString stringWithFormat:
-        @"com.hmmzzz.marktheme.runtime-applied.b%llu.s42",
+    NSString *expectedIconServiceAcknowledgement = [NSString stringWithFormat:
+        @"com.hmmzzz.marktheme.icon-service-applied.b%llu.s42",
         (unsigned long long)MARKTHEME_RUNTIME_BUILD_NUMBER];
     MTRuntimeKernelAssert(
-        [MTRuntimeAcknowledgementNotificationName(42)
-            isEqualToString:expectedAcknowledgement] &&
-        ![MTRuntimeAcknowledgementNotificationName(42) isEqualToString:
-            MTRuntimeAcknowledgementNotificationName(43)],
-        @"Apply acknowledgement must bind the exact Runtime build and state sequence");
+        [MTIconServiceInvalidationNotificationName isEqualToString:
+            @"com.hmmzzz.marktheme.icon-service-store-changed"] &&
+        [MTIconServiceAcknowledgementNotificationName(42)
+            isEqualToString:expectedIconServiceAcknowledgement] &&
+        ![MTIconServiceAcknowledgementNotificationName(42) isEqualToString:
+            MTIconServiceAcknowledgementNotificationName(43)],
+        @"IconServices acknowledgements must be bound to the exact build and sequence");
     return MTRuntimeKernelAssertionCount;
 }

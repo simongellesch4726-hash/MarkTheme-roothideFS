@@ -34,9 +34,8 @@ static _Atomic(uint32_t) MTIconMaskMode =
     ATOMIC_VAR_INIT(MTIconMaskPublishedModeDisabled);
 
 MTIconMaskSnapshotObservation MTRuntimeIconMaskSnapshotObservation = {
-    .schemaVersion = 1,
+    .schemaVersion = 2,
     .state = ATOMIC_VAR_INIT(MTIconMaskSnapshotModuleStateDormant),
-    .reloads = ATOMIC_VAR_INIT(0),
     .maskResourceHits = ATOMIC_VAR_INIT(0),
     .patternResourceHits = ATOMIC_VAR_INIT(0),
     .patternDigestMatches = ATOMIC_VAR_INIT(0),
@@ -52,7 +51,7 @@ MTIconMaskSnapshotObservation MTRuntimeIconMaskSnapshotObservation = {
     .cacheEvictions = ATOMIC_VAR_INIT(0),
 };
 
-_Static_assert(sizeof(MTIconMaskSnapshotObservation) == 120,
+_Static_assert(sizeof(MTIconMaskSnapshotObservation) == 112,
     "The icon-mask ModuleRuntime observation layout must remain fixed.");
 
 @interface MTIconMaskImageSet : NSObject
@@ -131,17 +130,13 @@ static void MTIconMaskBindComposition(UIImage *composed,
 @property(nonatomic, strong) dispatch_source_t memoryPressureSource;
 @property(nonatomic, assign) BOOL systemSurfaceContractsEnabled;
 @property(atomic, strong, nullable) MTIconMaskImageSet *currentImageSet;
-@property(atomic, assign) uint64_t requestedEpoch;
 - (instancetype)initWithKernel:(MTRuntimeKernel *)kernel
      systemSurfaceContractsEnabled:(BOOL)systemSurfaceContractsEnabled;
 - (void)purgeForMemoryPressure;
-- (void)reload;
+- (void)loadInitialImageSet;
 - (nullable UIImage *)resolveBundleIdentifier:(NSString *)bundleIdentifier
                                candidateImage:(nullable UIImage *)candidate
                                systemMaskImage:(nullable UIImage *)systemMask;
-- (nullable UIImage *)readyImageForBundleIdentifier:
-    (NSString *)bundleIdentifier
-                                    candidateImage:(nullable UIImage *)candidate;
 @end
 
 @implementation MTIconMaskSnapshotModule
@@ -200,6 +195,8 @@ static void MTIconMaskBindComposition(UIImage *composed,
                       resource:resolution.resource
               targetPixelWidth:pixelDimension
              targetPixelHeight:pixelDimension
+                  resizePolicy:
+                      MTRuntimePublishedImageResizePolicyBoundedScaleToFill
                          error:NULL];
     UIImage *image = decoded == nil ? nil : [[UIImage alloc]
         initWithCGImage:decoded.image
@@ -223,16 +220,7 @@ static void MTIconMaskBindComposition(UIImage *composed,
     return image;
 }
 
-- (void)publishImageSet:(nullable MTIconMaskImageSet *)imageSet
-                   epoch:(uint64_t)epoch
-    generationIdentifier:(nullable NSString *)generationIdentifier {
-    if (self.requestedEpoch != epoch) return;
-    NSString *active = self.kernel.currentSnapshot
-        .state.activeGenerationIdentifier;
-    if (generationIdentifier != nil &&
-        ![active isEqualToString:generationIdentifier]) {
-        return;
-    }
+- (void)publishImageSet:(nullable MTIconMaskImageSet *)imageSet {
     // Close the scalar hot-path gate before replacing the retained object.
     // Readers either finish against the previous immutable set or miss this
     // short publication window and are refreshed for the accepted Generation.
@@ -259,18 +247,10 @@ static void MTIconMaskBindComposition(UIImage *composed,
         imageSet == nil ? @"Configured" : @"Ready");
 }
 
-- (void)reload {
-    atomic_fetch_add_explicit(
-        &MTRuntimeIconMaskSnapshotObservation.reloads,
-        1, memory_order_relaxed);
-    uint64_t epoch = 0;
-    @synchronized (self) {
-        epoch = self.requestedEpoch + 1;
-        self.requestedEpoch = epoch;
-    }
+- (void)loadInitialImageSet {
     MTRuntimeSnapshot *snapshot = self.kernel.currentSnapshot;
     if (!snapshot.isReady) {
-        [self publishImageSet:nil epoch:epoch generationIdentifier:nil];
+        [self publishImageSet:nil];
         return;
     }
 
@@ -284,9 +264,7 @@ static void MTIconMaskBindComposition(UIImage *composed,
         ![enabled isKindOfClass:NSNumber.class] || !enabled.boolValue) {
         MTIconMaskImageSet *systemImageSet = MTIconMaskSystemImageSet(
             generation.generationIdentifier);
-        [self publishImageSet:systemImageSet
-                        epoch:epoch
-         generationIdentifier:generation.generationIdentifier];
+        [self publishImageSet:systemImageSet];
         return;
     }
 
@@ -297,9 +275,7 @@ static void MTIconMaskBindComposition(UIImage *composed,
     if (mask == nil || maskError != nil) {
         MTIconMaskImageSet *systemImageSet = MTIconMaskSystemImageSet(
             generation.generationIdentifier);
-        [self publishImageSet:systemImageSet
-                        epoch:epoch
-         generationIdentifier:generation.generationIdentifier];
+        [self publishImageSet:systemImageSet];
         return;
     }
     atomic_fetch_add_explicit(
@@ -327,9 +303,7 @@ static void MTIconMaskBindComposition(UIImage *composed,
     if (primaryMaskImage == nil) {
         MTIconMaskImageSet *systemImageSet = MTIconMaskSystemImageSet(
             generation.generationIdentifier);
-        [self publishImageSet:systemImageSet
-                        epoch:epoch
-         generationIdentifier:generation.generationIdentifier];
+        [self publishImageSet:systemImageSet];
         return;
     }
     MTIconMaskImageSet *imageSet = [[MTIconMaskImageSet alloc] init];
@@ -345,9 +319,7 @@ static void MTIconMaskBindComposition(UIImage *composed,
     // raster contracts are derived lazily by maskImageForImageSet: and then
     // retained once, avoiding several verified reads and ImageIO decodes in
     // processes that never render those surfaces.
-    [self publishImageSet:imageSet
-                    epoch:epoch
-     generationIdentifier:mask.generationIdentifier];
+    [self publishImageSet:imageSet];
 }
 
 - (nullable UIImage *)maskImageForImageSet:(MTIconMaskImageSet *)imageSet
@@ -564,56 +536,6 @@ static void MTIconMaskBindComposition(UIImage *composed,
     return composed;
 }
 
-- (UIImage *)readyImageForBundleIdentifier:(NSString *)bundleIdentifier
-                              candidateImage:(UIImage *)candidate {
-    atomic_fetch_add_explicit(
-        &MTRuntimeIconMaskSnapshotObservation.resolutionCalls,
-        1, memory_order_relaxed);
-    if (candidate == nil || bundleIdentifier.length == 0) return nil;
-
-    MTIconMaskImageSet *imageSet = self.currentImageSet;
-    UIImage *source = candidate;
-    BOOL unwrapped = NO;
-    for (NSUInteger depth = 0; depth < 4; depth++) {
-        MTIconMaskAppliedMetadata *metadata = objc_getAssociatedObject(
-            source, &MTIconMaskAppliedMetadataAssociationKey);
-        if (metadata == nil) break;
-        if (imageSet != nil &&
-            [metadata.token isEqualToString:imageSet.token]) {
-            atomic_fetch_add_explicit(
-                &MTRuntimeIconMaskSnapshotObservation.alreadyProcessedHits,
-                1, memory_order_relaxed);
-            return source;
-        }
-        if (metadata.sourceImage == nil || metadata.sourceImage == source) {
-            return nil;
-        }
-        source = metadata.sourceImage;
-        unwrapped = YES;
-    }
-    if (imageSet == nil) {
-        if (unwrapped) {
-            atomic_fetch_add_explicit(
-                &MTRuntimeIconMaskSnapshotObservation.restores,
-                1, memory_order_relaxed);
-        }
-        return source;
-    }
-    if (imageSet.usesSystemMask) return source;
-
-    MTIconMaskSourceMetadata *sourceMetadata = objc_getAssociatedObject(
-        source, &MTIconMaskSourceMetadataAssociationKey);
-    UIImage *composed = sourceMetadata.composedImage;
-    if ([sourceMetadata.token isEqualToString:imageSet.token] &&
-        composed != nil) {
-        atomic_fetch_add_explicit(
-            &MTRuntimeIconMaskSnapshotObservation.cacheHits,
-            1, memory_order_relaxed);
-        return composed;
-    }
-    return nil;
-}
-
 @end
 
 static os_unfair_lock MTIconMaskSnapshotLock = OS_UNFAIR_LOCK_INIT;
@@ -638,6 +560,7 @@ BOOL MTIconMaskSnapshotConfigure(MTRuntimeKernel *kernel,
             memory_order_release);
         MTRuntimeABIReportRecordModuleState(
             MTIconMaskSnapshotModuleID, MTIconMaskSnapshotModuleStateConfigured, @"Configured");
+        [MTIconMaskSnapshotInstance loadInitialImageSet];
     } else if (error != NULL) {
         *error = [NSError errorWithDomain:
             @"com.hmmzzz.marktheme.icon-mask-snapshot"
@@ -658,22 +581,12 @@ BOOL MTIconMaskSnapshotPrepare(void) {
     return prepared;
 }
 
-void MTIconMaskSnapshotReload(void) {
-    [MTIconMaskSnapshotInstance reload];
-}
-
 BOOL MTIconMaskSnapshotIsReadyForGeneration(
     NSString *generationIdentifier) {
     MTIconMaskImageSet *imageSet =
         MTIconMaskSnapshotInstance.currentImageSet;
     return generationIdentifier.length > 0 && imageSet != nil &&
         [imageSet.generationIdentifier isEqualToString:generationIdentifier];
-}
-
-BOOL MTIconMaskSnapshotIsEnabled(void) {
-    return atomic_load_explicit(
-        &MTIconMaskMode, memory_order_acquire) !=
-        MTIconMaskPublishedModeDisabled;
 }
 
 BOOL MTIconMaskSnapshotUsesSystemMask(void) {
@@ -759,13 +672,12 @@ id MTIconMaskSnapshotResolveSystemSurface(NSString *bundleIdentifier,
         systemMaskImage:carrier];
 }
 
-id MTIconMaskSnapshotResolveReady(NSString *bundleIdentifier,
-                                  id candidateImage) {
+id MTIconMaskSnapshotResolveTransitionCarrier(
+    NSString *bundleIdentifier,
+    id candidateImage) {
     if (![candidateImage isKindOfClass:UIImage.class]) return nil;
-    if (!MTIconMaskSnapshotCandidateRequiresResolution(candidateImage)) {
-        return candidateImage;
-    }
-    return [MTIconMaskSnapshotInstance
-        readyImageForBundleIdentifier:bundleIdentifier
-        candidateImage:candidateImage];
+    UIImage *candidate = candidateImage;
+    return MTIconMaskSnapshotResolveSystemSurface(
+        bundleIdentifier, candidate, nil,
+        candidate.size, candidate.scale);
 }

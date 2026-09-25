@@ -2,8 +2,6 @@
 
 #import "MTDesignSystem.h"
 #import "MTApplyResultViewController.h"
-#import "MTGenerationDescriptor.h"
-#import "MTGenerationReader.h"
 #import "MTImportDiagnostics.h"
 #import "MTImportViewController.h"
 #import "MTManagerController.h"
@@ -40,7 +38,7 @@ static NSString *MTThemeSecondaryText(MTThemeManifest *manifest) {
         return [NSString stringWithFormat:MTLocalized(@"theme.meta.version"),
                                           manifest.themeVersion];
     }
-    return MTLocalized(@"theme.meta.icon-theme");
+    return MTLocalized(@"theme.meta.system-theme");
 }
 
 @interface MTThemeHeroView : MTGradientView
@@ -101,8 +99,7 @@ static NSString *MTThemeSecondaryText(MTThemeManifest *manifest) {
     detailConfiguration.imagePadding = 4;
     detailConfiguration.contentInsets =
         NSDirectionalEdgeInsetsMake(0, 4, 0, 3);
-    detailConfiguration.baseForegroundColor =
-        [UIColor colorWithWhite:0.16 alpha:0.72];
+    detailConfiguration.baseForegroundColor = MTSpecimenInkColor();
     _detailButton.configuration = detailConfiguration;
     _detailButton.hidden = YES;
     [self addSubview:_detailButton];
@@ -929,7 +926,7 @@ static NSString *MTThemeSecondaryText(MTThemeManifest *manifest) {
         : summary.currentRevision.manifest.displayName;
     NSString *detail = summary == nil
         ? MTLocalized(@"theme.stock.card-detail")
-        : [NSString stringWithFormat:MTLocalized(@"theme.card.icon-count"),
+        : [NSString stringWithFormat:MTLocalized(@"theme.card.resource-count"),
             (unsigned long)summary.currentRevision.manifest.resources.count];
     NSArray<UIImage *> *images = themeIdentifier == nil
         ? MTSystemDefaultPreviewImages()
@@ -1360,7 +1357,7 @@ static NSString *MTThemeSecondaryText(MTThemeManifest *manifest) {
         : summary.currentRevision.manifest.displayName;
     __weak typeof(self) weakSelf = self;
     [self.managerController applySelectionWithCompletion:
-        ^(BOOL success, BOOL reloadRequired, NSError *error) {
+        ^(BOOL success, NSError *error) {
         typeof(self) self = weakSelf;
         if (self == nil) return;
         if (!success) {
@@ -1373,7 +1370,6 @@ static NSString *MTThemeSecondaryText(MTThemeManifest *manifest) {
             [[MTApplyResultViewController alloc]
                 initWithThemeName:themeName
                   restoredStock:themeIdentifier == nil
-                 reloadRequired:reloadRequired
                managerController:self.managerController];
         resultController.dismissalHandler =
             [self visibleProjectionDismissalHandler];

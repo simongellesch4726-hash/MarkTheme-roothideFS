@@ -590,15 +590,6 @@ static NSDictionary *_Nullable MTBenchmarkImportCase(
                         error:measureError];
                     return catalog != nil;
                 }, &operationError);
-            __block NSArray<MTThemeLibraryRevisionSummary *> *history = nil;
-            NSDictionary *historyMeasurement = MTBenchmarkMeasureOperation(
-                ^BOOL(NSError **measureError) {
-                    history = [library
-                        loadRevisionHistoryForThemeID:
-                            prepared.manifest.themeID
-                        cancellationToken:nil error:measureError];
-                    return history != nil;
-                }, &operationError);
             __block MTThemeLibraryRevision *loadedRevision = nil;
             NSDictionary *readMeasurement = MTBenchmarkMeasureOperation(
                 ^BOOL(NSError **measureError) {
@@ -608,9 +599,8 @@ static NSDictionary *_Nullable MTBenchmarkImportCase(
                         error:measureError];
                     return loadedRevision != nil;
                 }, &operationError);
-            if (catalogMeasurement == nil || historyMeasurement == nil ||
+            if (catalogMeasurement == nil ||
                 readMeasurement == nil || catalog.count != 1 ||
-                history.count != 1 ||
                 loadedRevision.assetCount != corpus.iconCount) {
                 MTBenchmarkSetError(&iterationError,
                     MTBenchmarkErrorInvariant,
@@ -642,6 +632,20 @@ static NSDictionary *_Nullable MTBenchmarkImportCase(
             }
             expectedGenerationIdentifier = generationIdentifier;
 
+            NSDictionary<NSString *, id> *threeLayerMix =
+                MTGenerationBenchmarkMeasureThreeLayerMixCompilation(
+                    loadedRevision, MTBenchmarkGenerationMeasure(),
+                    &operationError);
+            if (threeLayerMix == nil ||
+                [threeLayerMix[@"generationThreeLayerMixResourceCount"]
+                    unsignedIntegerValue] != corpus.iconCount) {
+                MTBenchmarkSetError(&iterationError,
+                    MTBenchmarkErrorInvariant,
+                    @"Synthetic three-layer fallback benchmark violated complete icon coverage.",
+                    operationError);
+                break;
+            }
+
             NSMutableDictionary *sample = [@{
                 @"repetition" : @(repetition + 1),
                 @"prepare" : prepareMeasurement,
@@ -649,7 +653,6 @@ static NSDictionary *_Nullable MTBenchmarkImportCase(
                 @"prepareStageCPUMicroseconds" : progress.cpuDurations,
                 @"commit" : commitMeasurement,
                 @"catalog" : catalogMeasurement,
-                @"history" : historyMeasurement,
                 @"fullRevisionRead" : readMeasurement,
                 @"sourceFileCount" : @(prepared.sourceFileCount),
                 @"recognizedFileCount" : @(prepared.recognizedFileCount),
@@ -659,6 +662,7 @@ static NSDictionary *_Nullable MTBenchmarkImportCase(
                     @(loadedRevision.assetByteCount),
             } mutableCopy];
             [sample addEntriesFromDictionary:generation];
+            [sample addEntriesFromDictionary:threeLayerMix];
             [samples addObject:[sample copy]];
             if (!MTBenchmarkRemoveTemporaryNode(runRoot, &operationError)) {
                 iterationError = operationError;
@@ -690,7 +694,8 @@ static NSDictionary *_Nullable MTBenchmarkImportCase(
             @"prepare", @"commit", @"catalog", @"history",
             @"fullRevisionRead", @"generationCompile", @"generationWrite",
             @"generationFreshReaderFullValidate",
-            @"generationResourceLookup100k"
+            @"generationResourceLookup100k",
+            @"generationThreeLayerMixCompile"
         ]),
         @"prepareStageSummary" : MTBenchmarkStageSummary(samples),
     };

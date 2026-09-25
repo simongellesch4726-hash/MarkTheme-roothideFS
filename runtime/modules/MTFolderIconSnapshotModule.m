@@ -2,6 +2,7 @@
 
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import <os/lock.h>
 
 #import "MTGenerationReader.h"
@@ -15,24 +16,24 @@
 #import "MTRuntimeABIReport.h"
 
 #include <math.h>
+#include <stdatomic.h>
 
 NSString *const MTFolderIconSnapshotModuleID = @"folder-icons.snapshot";
 
 MTFolderIconSnapshotObservation MTRuntimeFolderIconSnapshotObservation = {
-    .schemaVersion = 1,
+    .schemaVersion = 2,
     .state = ATOMIC_VAR_INIT(MTFolderIconSnapshotModuleStateDormant),
-    .reloads = ATOMIC_VAR_INIT(0),
     .baseResourceHits = ATOMIC_VAR_INIT(0),
     .lightResourceHits = ATOMIC_VAR_INIT(0),
     .decodeSuccesses = ATOMIC_VAR_INIT(0),
     .decodeFailures = ATOMIC_VAR_INIT(0),
-    .viewResolutions = ATOMIC_VAR_INIT(0),
-    .replacementViewsCreated = ATOMIC_VAR_INIT(0),
-    .originalViewsRestored = ATOMIC_VAR_INIT(0),
+    .backgroundResolutions = ATOMIC_VAR_INIT(0),
+    .backgroundReplacements = ATOMIC_VAR_INIT(0),
+    .overlayActivations = ATOMIC_VAR_INIT(0),
 };
 
-_Static_assert(sizeof(MTFolderIconSnapshotObservation) == 72,
-    "The Folder ModuleRuntime observation layout must remain fixed.");
+_Static_assert(sizeof(MTFolderIconSnapshotObservation) == 64,
+    "Folder ModuleRuntime observation ABI changed");
 
 @interface MTFolderIconImageSet : NSObject
 @property(nonatomic, copy) NSString *generationIdentifier;
@@ -43,26 +44,234 @@ _Static_assert(sizeof(MTFolderIconSnapshotObservation) == 72,
 @implementation MTFolderIconImageSet
 @end
 
+@interface MTFolderThemedBackgroundImageView : UIImageView
+@property(nonatomic, copy) NSString *generationIdentifier;
+@end
+
+@implementation MTFolderThemedBackgroundImageView
+@end
+
+@interface MTFolderOverlayState : NSObject {
+@public
+    CGFloat _gridAlpha;
+    CGFloat _floatyFraction;
+    __strong UIImageView *_overlayView;
+}
+@end
+
+@implementation MTFolderOverlayState
+- (instancetype)init {
+    self = [super init];
+    if (self == nil) return nil;
+    _gridAlpha = 1.0;
+    return self;
+}
+@end
+
 @interface MTFolderIconSnapshotModule : NSObject
 @property(nonatomic, weak) MTRuntimeKernel *kernel;
 @property(nonatomic, strong)
     MTSpringBoardDecorationSnapshotResolver *resolver;
 @property(nonatomic, strong) MTRuntimePublishedImageLoader *imageLoader;
 @property(atomic, strong, nullable) MTFolderIconImageSet *currentImageSet;
-@property(atomic, assign) uint64_t requestedEpoch;
-@property(atomic, copy, nullable) dispatch_block_t readyHandler;
-@property(nonatomic, strong) NSMapTable<UIView *, id> *originalViews;
-@property(nonatomic, strong)
-    NSMapTable<UIView *, UIImageView *> *replacementViews;
-@property(nonatomic, strong)
-    NSMapTable<UIView *, UIImageView *> *overlayViews;
 - (instancetype)initWithKernel:(MTRuntimeKernel *)kernel;
-- (void)reload;
-- (nullable UIView *)resolveFolderView:(UIView *)folderView
-                    originalBackground:(nullable UIView *)originalBackground
-                            didReplace:(BOOL *)didReplace;
-- (BOOL)resolveOverlayForFolderView:(UIView *)folderView;
+- (void)loadInitialImageSet;
+- (nullable UIView *)resolveNativeBackgroundForFolderView:(UIView *)folderView
+                                         nativeBackground:(UIView *)nativeBackground;
+- (BOOL)synchronizeOverlayForFolderView:(UIView *)folderView
+                     installedBackground:(nullable UIView *)installedBackground
+                        foregroundAnchor:(nullable UIView *)foregroundAnchor;
 @end
+
+static char MTFolderOverlayStateAssociationKey;
+
+static CGFloat MTFolderNormalizedOverlayAlpha(CGFloat alpha) {
+    if (!isfinite(alpha)) return 1.0;
+    return fmin(1.0, fmax(0.0, alpha));
+}
+
+static MTFolderOverlayState *MTFolderOverlayStateForFolderView(
+    UIView *folderView,
+    BOOL create) {
+    if (folderView == nil) return nil;
+    MTFolderOverlayState *state = objc_getAssociatedObject(
+        folderView, &MTFolderOverlayStateAssociationKey);
+    if (state == nil && create) {
+        state = [[MTFolderOverlayState alloc] init];
+        objc_setAssociatedObject(
+            folderView, &MTFolderOverlayStateAssociationKey, state,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return state;
+}
+
+static CGFloat MTFolderEffectiveOverlayAlpha(MTFolderOverlayState *state) {
+    if (state == nil) return 1.0;
+    return state->_gridAlpha * (1.0 - state->_floatyFraction);
+}
+
+static BOOL MTFolderApplyEffectiveOverlayAlpha(
+    MTFolderOverlayState *state) {
+    UIImageView *overlayView = state->_overlayView;
+    if (![overlayView isKindOfClass:UIImageView.class]) return NO;
+    overlayView.alpha = MTFolderEffectiveOverlayAlpha(state);
+    return YES;
+}
+
+static BOOL MTFolderSetAssociatedOverlayGridAlpha(UIView *folderView,
+                                                   CGFloat alpha) {
+    MTFolderOverlayState *state = MTFolderOverlayStateForFolderView(
+        folderView, YES);
+    if (state == nil) return NO;
+    state->_gridAlpha = MTFolderNormalizedOverlayAlpha(alpha);
+    return MTFolderApplyEffectiveOverlayAlpha(state);
+}
+
+static BOOL MTFolderSetAssociatedFloatyFraction(UIView *folderView,
+                                                 CGFloat fraction) {
+    MTFolderOverlayState *state = MTFolderOverlayStateForFolderView(
+        folderView, YES);
+    if (state == nil) return NO;
+    state->_floatyFraction = MTFolderNormalizedOverlayAlpha(fraction);
+    return MTFolderApplyEffectiveOverlayAlpha(state);
+}
+
+static BOOL MTFolderRemoveAssociatedOverlay(UIView *folderView) {
+    MTFolderOverlayState *state = MTFolderOverlayStateForFolderView(
+        folderView, NO);
+    UIImageView *overlayView = state->_overlayView;
+    BOOL removed = [overlayView isKindOfClass:UIImageView.class];
+    [overlayView removeFromSuperview];
+    state->_overlayView = nil;
+    return removed;
+}
+
+static BOOL MTFolderPointSizeIsSupported(CGSize size) {
+    return isfinite(size.width) && isfinite(size.height) &&
+        size.width >= 1.0 && size.height >= 1.0 &&
+        size.width <= 400.0 && size.height <= 400.0;
+}
+
+typedef struct MTFolderInstalledBackgroundGeometry {
+    CGSize pointSize;
+    CGRect bounds;
+    CGPoint center;
+    CGAffineTransform transform;
+    UIViewAutoresizing autoresizingMask;
+} MTFolderInstalledBackgroundGeometry;
+
+static BOOL MTFolderResolveInstalledBackgroundGeometry(
+    UIView *folderView,
+    UIView *backgroundView,
+    MTFolderInstalledBackgroundGeometry *geometry) {
+    if (folderView == nil || backgroundView == nil || geometry == NULL) {
+        return NO;
+    }
+
+    CGSize pointSize = backgroundView.bounds.size;
+    if (backgroundView == folderView &&
+        MTFolderPointSizeIsSupported(pointSize)) {
+        geometry->pointSize = pointSize;
+        geometry->bounds = folderView.bounds;
+        geometry->center = CGPointMake(
+            CGRectGetMidX(folderView.bounds),
+            CGRectGetMidY(folderView.bounds));
+        geometry->transform = CGAffineTransformIdentity;
+        geometry->autoresizingMask =
+            UIViewAutoresizingFlexibleWidth |
+            UIViewAutoresizingFlexibleHeight;
+        return YES;
+    }
+    if (backgroundView.superview == folderView &&
+        MTFolderPointSizeIsSupported(pointSize)) {
+        geometry->pointSize = pointSize;
+        geometry->bounds = backgroundView.bounds;
+        geometry->center = backgroundView.center;
+        geometry->transform = backgroundView.transform;
+        geometry->autoresizingMask = backgroundView.autoresizingMask;
+        return YES;
+    }
+
+    CGRect frame = [backgroundView isDescendantOfView:folderView]
+        ? [backgroundView convertRect:backgroundView.bounds
+                               toView:folderView]
+        : backgroundView.frame;
+    if (!MTFolderPointSizeIsSupported(frame.size)) return NO;
+    if (!MTFolderPointSizeIsSupported(pointSize)) pointSize = frame.size;
+    geometry->pointSize = pointSize;
+    geometry->bounds = (CGRect){CGPointZero, frame.size};
+    geometry->center = CGPointMake(
+        CGRectGetMidX(frame), CGRectGetMidY(frame));
+    geometry->transform = CGAffineTransformIdentity;
+    geometry->autoresizingMask = UIViewAutoresizingNone;
+    return YES;
+}
+
+static CGFloat MTFolderDisplayScale(UIView *folderView,
+                                    UIView *backgroundView) {
+    CGFloat scale = folderView.traitCollection.displayScale;
+    if (!isfinite(scale) || scale < 1.0) {
+        scale = folderView.layer.contentsScale;
+    }
+    if ((!isfinite(scale) || scale < 1.0) && backgroundView != nil) {
+        scale = backgroundView.traitCollection.displayScale;
+    }
+    if ((!isfinite(scale) || scale < 1.0) && backgroundView != nil) {
+        scale = backgroundView.layer.contentsScale;
+    }
+    if (!isfinite(scale) || scale < 1.0) {
+        scale = folderView.contentScaleFactor;
+    }
+    NSInteger roundedScale = isfinite(scale)
+        ? (NSInteger)llround(scale) : 0;
+    return roundedScale >= 1 && roundedScale <= 3 &&
+        fabs(scale - (CGFloat)roundedScale) <= 0.001
+            ? (CGFloat)roundedScale : 0.0;
+}
+
+static UIImage *MTFolderResolveOverlayArtwork(
+    UIView *folderView,
+    UIView *backgroundView,
+    const MTFolderInstalledBackgroundGeometry *geometry,
+    CGFloat displayScale) {
+    if (folderView == nil || backgroundView == nil || geometry == NULL ||
+        displayScale <= 0) return nil;
+
+    // Background views in SpringBoard may use a large internal coordinate
+    // space plus a transform. Prefer the installed image's logical size, then
+    // the transformed on-screen extent, before falling back to either view's
+    // raw bounds. Every candidate is only a target rendering contract: the
+    // authored overlay itself remains unrestricted and is scale-to-filled into
+    // the exact installed background geometry by the caller.
+    CGSize candidates[5] = {0};
+    NSUInteger candidateCount = 0;
+    if ([backgroundView isKindOfClass:UIImageView.class]) {
+        UIImage *backgroundImage = ((UIImageView *)backgroundView).image;
+        if (backgroundImage != nil) {
+            candidates[candidateCount++] = backgroundImage.size;
+        }
+    }
+    CGRect displayedFrame = [backgroundView convertRect:backgroundView.bounds
+                                                  toView:folderView];
+    candidates[candidateCount++] = CGSizeMake(
+        fabs(displayedFrame.size.width), fabs(displayedFrame.size.height));
+    candidates[candidateCount++] = folderView.bounds.size;
+    candidates[candidateCount++] = geometry->pointSize;
+    candidates[candidateCount++] =
+        MTStaticIconVisualProofExpectedPointSize;
+
+    for (NSUInteger index = 0; index < candidateCount; index++) {
+        CGSize pointSize = candidates[index];
+        if (!MTFolderPointSizeIsSupported(pointSize) ||
+            fabs(pointSize.width - pointSize.height) > 0.001) {
+            continue;
+        }
+        UIImage *artwork = MTIconOverlaySnapshotResolveArtwork(
+            pointSize, displayScale);
+        if (artwork != nil) return artwork;
+    }
+    return nil;
+}
 
 @implementation MTFolderIconSnapshotModule
 
@@ -75,22 +284,7 @@ _Static_assert(sizeof(MTFolderIconSnapshotObservation) == 72,
             return kernel.currentSnapshot;
         }];
     _imageLoader = MTRuntimePublishedImageLoader.staticIconLoader;
-    _originalViews = [NSMapTable
-        mapTableWithKeyOptions:NSPointerFunctionsWeakMemory |
-                               NSPointerFunctionsObjectPointerPersonality
-                  valueOptions:NSPointerFunctionsStrongMemory];
-    _replacementViews = [NSMapTable
-        mapTableWithKeyOptions:NSPointerFunctionsWeakMemory |
-                               NSPointerFunctionsObjectPointerPersonality
-                  valueOptions:NSPointerFunctionsStrongMemory];
-    _overlayViews = [NSMapTable
-        mapTableWithKeyOptions:NSPointerFunctionsWeakMemory |
-                               NSPointerFunctionsObjectPointerPersonality
-                  valueOptions:NSPointerFunctionsStrongMemory];
-    if (_resolver == nil || _imageLoader == nil || _originalViews == nil ||
-        _replacementViews == nil || _overlayViews == nil) {
-        return nil;
-    }
+    if (_resolver == nil || _imageLoader == nil) return nil;
     return self;
 }
 
@@ -120,16 +314,7 @@ _Static_assert(sizeof(MTFolderIconSnapshotObservation) == 72,
     return image;
 }
 
-- (void)publishImageSet:(nullable MTFolderIconImageSet *)imageSet
-                   epoch:(uint64_t)epoch
-    generationIdentifier:(nullable NSString *)generationIdentifier {
-    if (self.requestedEpoch != epoch) return;
-    NSString *active = self.kernel.currentSnapshot
-        .state.activeGenerationIdentifier;
-    if (generationIdentifier != nil &&
-        ![active isEqualToString:generationIdentifier]) {
-        return;
-    }
+- (void)publishImageSet:(nullable MTFolderIconImageSet *)imageSet {
     self.currentImageSet = imageSet;
     atomic_store_explicit(
         &MTRuntimeFolderIconSnapshotObservation.state,
@@ -141,22 +326,12 @@ _Static_assert(sizeof(MTFolderIconSnapshotObservation) == 72,
         imageSet == nil ? MTFolderIconSnapshotModuleStateConfigured
                         : MTFolderIconSnapshotModuleStateReady,
         imageSet == nil ? @"Configured" : @"Ready");
-    dispatch_block_t handler = self.readyHandler;
-    if (handler != nil) dispatch_async(dispatch_get_main_queue(), handler);
 }
 
-- (void)reload {
-    atomic_fetch_add_explicit(
-        &MTRuntimeFolderIconSnapshotObservation.reloads,
-        1, memory_order_relaxed);
-    uint64_t epoch = 0;
-    @synchronized (self) {
-        epoch = self.requestedEpoch + 1;
-        self.requestedEpoch = epoch;
-    }
+- (void)loadInitialImageSet {
     MTRuntimeSnapshot *snapshot = self.kernel.currentSnapshot;
     if (!snapshot.isReady) {
-        [self publishImageSet:nil epoch:epoch generationIdentifier:nil];
+        [self publishImageSet:nil];
         return;
     }
 
@@ -165,7 +340,7 @@ _Static_assert(sizeof(MTFolderIconSnapshotObservation) == 72,
         resolutionForKind:MTSpringBoardDecorationKindFolderBackground
                      error:&baseError];
     if (base == nil || baseError != nil) {
-        [self publishImageSet:nil epoch:epoch generationIdentifier:nil];
+        [self publishImageSet:nil];
         return;
     }
     atomic_fetch_add_explicit(
@@ -173,7 +348,7 @@ _Static_assert(sizeof(MTFolderIconSnapshotObservation) == 72,
         1, memory_order_relaxed);
     UIImage *background = [self decodeResolution:base];
     if (background == nil) {
-        [self publishImageSet:nil epoch:epoch generationIdentifier:nil];
+        [self publishImageSet:nil];
         return;
     }
 
@@ -198,128 +373,150 @@ _Static_assert(sizeof(MTFolderIconSnapshotObservation) == 72,
     imageSet.generationIdentifier = base.generationIdentifier;
     imageSet.background = background;
     imageSet.lightBackground = lightBackground;
-    [self publishImageSet:imageSet
-                    epoch:epoch
-     generationIdentifier:base.generationIdentifier];
+    [self publishImageSet:imageSet];
 }
 
-- (nullable UIView *)resolveFolderView:(UIView *)folderView
-                    originalBackground:(nullable UIView *)originalBackground
-                            didReplace:(BOOL *)didReplace {
-    if (didReplace != NULL) *didReplace = NO;
+- (nullable UIView *)resolveNativeBackgroundForFolderView:(UIView *)folderView
+                                         nativeBackground:(UIView *)nativeBackground {
     atomic_fetch_add_explicit(
-        &MTRuntimeFolderIconSnapshotObservation.viewResolutions,
+        &MTRuntimeFolderIconSnapshotObservation.backgroundResolutions,
         1, memory_order_relaxed);
-    if (![NSThread isMainThread]) return originalBackground;
-
-    UIImageView *replacement = [self.replacementViews objectForKey:folderView];
-    if (originalBackground != replacement) {
-        [self.originalViews setObject:originalBackground ?: NSNull.null
-                               forKey:folderView];
-    }
+    if (![NSThread isMainThread]) return nativeBackground;
 
     MTFolderIconImageSet *imageSet = self.currentImageSet;
-    if (imageSet == nil) {
-        if (replacement != nil && originalBackground == replacement) {
-            id stored = [self.originalViews objectForKey:folderView];
-            UIView *restored = stored == NSNull.null ? nil : stored;
-            [self.replacementViews removeObjectForKey:folderView];
-            [self.originalViews removeObjectForKey:folderView];
-            if (didReplace != NULL) *didReplace = YES;
-            atomic_fetch_add_explicit(
-                &MTRuntimeFolderIconSnapshotObservation.originalViewsRestored,
-                1, memory_order_relaxed);
-            return restored;
-        }
-        [self.replacementViews removeObjectForKey:folderView];
-        [self.originalViews removeObjectForKey:folderView];
-        return originalBackground;
-    }
-
+    if (imageSet == nil) return nativeBackground;
     BOOL prefersLight = folderView.traitCollection.userInterfaceStyle ==
         UIUserInterfaceStyleLight;
     UIImage *image = prefersLight && imageSet.lightBackground != nil
         ? imageSet.lightBackground : imageSet.background;
-    if (replacement == nil) {
-        CGRect frame = originalBackground == nil
-            ? folderView.bounds : originalBackground.frame;
-        replacement = [[UIImageView alloc] initWithFrame:frame];
-        replacement.autoresizingMask = originalBackground == nil
-            ? UIViewAutoresizingFlexibleWidth |
-              UIViewAutoresizingFlexibleHeight
-            : originalBackground.autoresizingMask;
-        replacement.backgroundColor = UIColor.clearColor;
-        replacement.contentMode = UIViewContentModeScaleAspectFill;
-        replacement.clipsToBounds = YES;
-        replacement.userInteractionEnabled = NO;
-        [self.replacementViews setObject:replacement forKey:folderView];
-        atomic_fetch_add_explicit(
-            &MTRuntimeFolderIconSnapshotObservation.replacementViewsCreated,
-            1, memory_order_relaxed);
+    if (image == nil) return nativeBackground;
+
+    if ([nativeBackground
+            isKindOfClass:MTFolderThemedBackgroundImageView.class]) {
+        MTFolderThemedBackgroundImageView *existing =
+            (MTFolderThemedBackgroundImageView *)nativeBackground;
+        if ([existing.generationIdentifier
+                isEqualToString:imageSet.generationIdentifier]) {
+            existing.image = image;
+            return existing;
+        }
     }
+
+    CGRect nativeBounds = nativeBackground.bounds;
+    CGPoint nativeCenter = nativeBackground.center;
+    CGAffineTransform nativeTransform = nativeBackground.transform;
+    if (!MTFolderPointSizeIsSupported(nativeBounds.size)) {
+        CGRect fallbackFrame = nativeBackground.frame;
+        if (!MTFolderPointSizeIsSupported(fallbackFrame.size)) {
+            fallbackFrame = folderView.bounds;
+        }
+        nativeBounds = (CGRect){CGPointZero, fallbackFrame.size};
+        nativeCenter = CGPointMake(
+            CGRectGetMidX(fallbackFrame), CGRectGetMidY(fallbackFrame));
+        nativeTransform = CGAffineTransformIdentity;
+    }
+
+    MTFolderThemedBackgroundImageView *replacement =
+        [[MTFolderThemedBackgroundImageView alloc] initWithFrame:CGRectZero];
+    replacement.generationIdentifier = imageSet.generationIdentifier;
     replacement.image = image;
-    if (originalBackground == replacement) return originalBackground;
-    if (didReplace != NULL) *didReplace = YES;
+    replacement.autoresizingMask = nativeBackground.autoresizingMask;
+    replacement.alpha = nativeBackground.alpha;
+    replacement.hidden = nativeBackground.hidden;
+    replacement.bounds = nativeBounds;
+    replacement.center = nativeCenter;
+    replacement.transform = nativeTransform;
+    replacement.backgroundColor = UIColor.clearColor;
+    replacement.contentMode = UIViewContentModeScaleAspectFill;
+    replacement.clipsToBounds = YES;
+    replacement.userInteractionEnabled = NO;
+    replacement.isAccessibilityElement = NO;
+    replacement.accessibilityElementsHidden = YES;
+    replacement.layer.cornerCurve = kCACornerCurveContinuous;
+    atomic_fetch_add_explicit(
+        &MTRuntimeFolderIconSnapshotObservation.backgroundReplacements,
+        1, memory_order_relaxed);
     return replacement;
 }
 
-- (BOOL)resolveOverlayForFolderView:(UIView *)folderView {
+- (BOOL)synchronizeOverlayForFolderView:(UIView *)folderView
+                     installedBackground:(nullable UIView *)installedBackground
+                        foregroundAnchor:(nullable UIView *)foregroundAnchor {
     if (![NSThread isMainThread]) return NO;
-    UIImageView *overlayView = [self.overlayViews objectForKey:folderView];
     if (!MTIconOverlaySnapshotIsEnabled()) {
-        if (overlayView != nil) {
-            [overlayView removeFromSuperview];
-            [self.overlayViews removeObjectForKey:folderView];
-        }
+        (void)MTFolderRemoveAssociatedOverlay(folderView);
         return NO;
     }
-    CGSize pointSize = folderView.bounds.size;
-    CGFloat displayScale = folderView.traitCollection.displayScale;
-    if (!isfinite(displayScale) || displayScale < 1.0) {
-        displayScale = folderView.layer.contentsScale;
-    }
-    if (!isfinite(displayScale) || displayScale < 1.0) {
-        displayScale = folderView.contentScaleFactor;
-    }
-    NSInteger roundedScale = isfinite(displayScale)
-        ? (NSInteger)llround(displayScale) : 0;
-    BOOL validScale = roundedScale >= 1 && roundedScale <= 3 &&
-        fabs(displayScale - (CGFloat)roundedScale) <= 0.001;
-    UIImage *overlayImage = validScale
-        ? MTIconOverlaySnapshotResolveArtwork(
-            pointSize, (CGFloat)roundedScale)
-        : nil;
+    MTFolderOverlayState *state = MTFolderOverlayStateForFolderView(
+        folderView, YES);
+    if (state == nil) return NO;
+    UIImageView *overlayView = state->_overlayView;
+
+    // A stock folder need not expose a separate backgroundView and may never
+    // call setBackgroundView: after Runtime installation. Its own bounds remain
+    // the geometry fallback. The overlay is permanently retained by this
+    // compact folder canvas so native motion applies without a detached view.
+    UIView *geometryCarrier = installedBackground ?: folderView;
+    UIView *overlayContainer = folderView;
+    MTFolderInstalledBackgroundGeometry geometry = {0};
+    BOOL hasGeometry = MTFolderResolveInstalledBackgroundGeometry(
+        folderView, geometryCarrier, &geometry);
+    CGFloat displayScale = MTFolderDisplayScale(
+        folderView, geometryCarrier);
+    UIImage *overlayImage =
+        hasGeometry && displayScale > 0
+            ? MTFolderResolveOverlayArtwork(
+                folderView, geometryCarrier, &geometry, displayScale)
+            : nil;
     if (overlayImage == nil) {
-        if (overlayView != nil) {
-            [overlayView removeFromSuperview];
-            [self.overlayViews removeObjectForKey:folderView];
-        }
+        (void)MTFolderRemoveAssociatedOverlay(folderView);
         return NO;
     }
     if (overlayView == nil) {
-        overlayView = [[UIImageView alloc] initWithFrame:folderView.bounds];
-        overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
-            UIViewAutoresizingFlexibleHeight;
+        overlayView = [[UIImageView alloc] initWithFrame:CGRectZero];
         overlayView.backgroundColor = UIColor.clearColor;
         overlayView.contentMode = UIViewContentModeScaleToFill;
         overlayView.userInteractionEnabled = NO;
-        [self.overlayViews setObject:overlayView forKey:folderView];
+        overlayView.isAccessibilityElement = NO;
+        overlayView.accessibilityElementsHidden = YES;
+        state->_overlayView = overlayView;
     }
-    if (!CGRectEqualToRect(overlayView.frame, folderView.bounds)) {
-        overlayView.frame = folderView.bounds;
+    overlayView.autoresizingMask = geometry.autoresizingMask;
+    overlayView.bounds = geometry.bounds;
+    overlayView.center = geometry.center;
+    overlayView.transform = geometry.transform;
+    overlayView.hidden = NO;
+    // The native badge can be a sibling inside this compact canvas. Keep the
+    // same depth and explicitly order artwork below that foreground anchor.
+    overlayView.layer.zPosition = 0.0;
+    UIImage *current = overlayView.image;
+    BOOL sameRaster = current != nil &&
+        current.CGImage == overlayImage.CGImage &&
+        current.scale == overlayImage.scale &&
+        current.imageOrientation == overlayImage.imageOrientation;
+    if (!sameRaster) overlayView.image = overlayImage;
+    if (foregroundAnchor != overlayView &&
+        foregroundAnchor.superview == overlayContainer) {
+        NSArray<UIView *> *subviews = overlayContainer.subviews;
+        NSUInteger anchorIndex = [subviews
+            indexOfObjectIdenticalTo:foregroundAnchor];
+        if (anchorIndex == 0 || anchorIndex == NSNotFound ||
+            subviews[anchorIndex - 1] != overlayView) {
+            [overlayContainer insertSubview:overlayView
+                               belowSubview:foregroundAnchor];
+        }
+    } else {
+        if (overlayView.superview != overlayContainer) {
+            [overlayContainer addSubview:overlayView];
+        }
+        if (overlayContainer.subviews.lastObject != overlayView) {
+            [overlayContainer bringSubviewToFront:overlayView];
+        }
     }
-    UIImage *currentOverlayImage = overlayView.image;
-    BOOL sameOverlayRaster = currentOverlayImage != nil &&
-        currentOverlayImage.CGImage == overlayImage.CGImage &&
-        currentOverlayImage.scale == overlayImage.scale &&
-        currentOverlayImage.imageOrientation == overlayImage.imageOrientation;
-    if (!sameOverlayRaster) overlayView.image = overlayImage;
-    if (overlayView.superview != folderView) {
-        [folderView addSubview:overlayView];
-    }
-    if (folderView.subviews.lastObject != overlayView) {
-        [folderView bringSubviewToFront:overlayView];
-    }
+    (void)MTFolderApplyEffectiveOverlayAlpha(state);
+    atomic_fetch_add_explicit(
+        &MTRuntimeFolderIconSnapshotObservation.overlayActivations,
+        1, memory_order_relaxed);
     return YES;
 }
 
@@ -344,7 +541,9 @@ BOOL MTFolderIconSnapshotConfigure(MTRuntimeKernel *kernel,
             MTFolderIconSnapshotModuleStateConfigured,
             memory_order_release);
         MTRuntimeABIReportRecordModuleState(
-            MTFolderIconSnapshotModuleID, MTFolderIconSnapshotModuleStateConfigured, @"Configured");
+            MTFolderIconSnapshotModuleID,
+            MTFolderIconSnapshotModuleStateConfigured, @"Configured");
+        [MTFolderIconSnapshotInstance loadInitialImageSet];
     } else if (error != NULL) {
         *error = [NSError errorWithDomain:
             @"com.hmmzzz.marktheme.folder-snapshot"
@@ -357,31 +556,59 @@ BOOL MTFolderIconSnapshotConfigure(MTRuntimeKernel *kernel,
     return configured;
 }
 
-void MTFolderIconSnapshotReload(void) {
-    [MTFolderIconSnapshotInstance reload];
+BOOL MTFolderIconSnapshotPrepare(void) {
+    if (![NSThread isMainThread]) return NO;
+    os_unfair_lock_lock(&MTFolderIconSnapshotLock);
+    BOOL prepared = MTFolderIconSnapshotInstance != nil;
+    os_unfair_lock_unlock(&MTFolderIconSnapshotLock);
+    return prepared;
 }
 
-void MTFolderIconSnapshotSetReadyHandler(dispatch_block_t handler) {
-    MTFolderIconSnapshotInstance.readyHandler = handler;
-}
-
-id MTFolderIconSnapshotResolveBackgroundView(id folderImageView,
-                                             id originalBackgroundView,
-                                             BOOL *didReplace) {
-    if (didReplace != NULL) *didReplace = NO;
+id MTFolderIconSnapshotResolveNativeBackground(
+    id folderImageView,
+    id nativeBackgroundView) {
     if (![folderImageView isKindOfClass:UIView.class] ||
-        (originalBackgroundView != nil &&
-         ![originalBackgroundView isKindOfClass:UIView.class])) {
-        return originalBackgroundView;
+        ![nativeBackgroundView isKindOfClass:UIView.class]) {
+        return nativeBackgroundView;
     }
     return [MTFolderIconSnapshotInstance
-        resolveFolderView:folderImageView
-        originalBackground:originalBackgroundView
-        didReplace:didReplace];
+        resolveNativeBackgroundForFolderView:folderImageView
+        nativeBackground:nativeBackgroundView];
 }
 
-BOOL MTFolderIconSnapshotResolveOverlayView(id folderImageView) {
-    if (![folderImageView isKindOfClass:UIView.class]) return NO;
+BOOL MTFolderIconSnapshotSynchronizeOverlay(
+    id folderImageView,
+    id installedBackgroundView,
+    id foregroundAnchor) {
+    if (![folderImageView isKindOfClass:UIView.class] ||
+        (installedBackgroundView != nil &&
+         ![installedBackgroundView isKindOfClass:UIView.class]) ||
+        (foregroundAnchor != nil &&
+         ![foregroundAnchor isKindOfClass:UIView.class])) {
+        return NO;
+    }
     return [MTFolderIconSnapshotInstance
-        resolveOverlayForFolderView:folderImageView];
+        synchronizeOverlayForFolderView:folderImageView
+        installedBackground:installedBackgroundView
+        foregroundAnchor:foregroundAnchor];
+}
+
+BOOL MTFolderIconSnapshotSetOverlayAlpha(id folderImageView,
+                                         CGFloat alpha) {
+    if (![NSThread isMainThread] ||
+        ![folderImageView isKindOfClass:UIView.class]) {
+        return NO;
+    }
+    return MTFolderSetAssociatedOverlayGridAlpha(folderImageView, alpha);
+}
+
+BOOL MTFolderIconSnapshotSetFloatyCrossfadeFraction(
+    id folderImageView,
+    CGFloat fraction) {
+    if (![NSThread isMainThread] ||
+        ![folderImageView isKindOfClass:UIView.class]) {
+        return NO;
+    }
+    return MTFolderSetAssociatedFloatyFraction(
+        folderImageView, fraction);
 }

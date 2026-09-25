@@ -15,11 +15,11 @@ MTModuleDescriptor *MTCalendarIconsModuleDescriptor(void) {
                resourceKinds:@[@"icon.calendar.composite"]
                 dependencies:@[@"icons.static"]
              processAdapters:@[
-                    @"springboard.icon-image-cache",
-                    @"spotlight.icon-image-cache",
-                    @"spotlight.search-ui-app-image",
+                    @"calendar-ui-kit.dynamic-icon-source",
+                    @"springboard.calendar-appearance",
+                    @"spotlight.calendar-appearance",
                ]
-          refreshRequirement:MTRefreshRequirementTargeted
+          refreshRequirement:MTRefreshRequirementRespring
                        error:NULL];
     });
     return descriptor;

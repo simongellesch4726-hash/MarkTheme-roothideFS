@@ -7,16 +7,7 @@ RootHide。它在兼容主流主题资产（SnowBoard / IconBundles 风格的 `.
 主题的解析与编译全部放在无注入的管理器 App 内完成，注入进程中只运行一个尽可能小的 Runtime，
 并始终以「回到系统原生外观」作为失败时的正确结果。
 
-当前版本为 `v0.2.6`。两种越狱环境使用不同软件包，请勿混装。
-
-`v0.2.6` 新增完整的跨主题混搭与逐功能生效开关。主题详情始终列出 MarkTheme 支持的全部功能，
-即使当前主题没有对应资源，也可从其他已导入主题补齐；关闭某项功能后，该能力不会写入新的
-Generation，并由系统原生外观接管。overlay 的启用状态与来源选择现在严格跟随当前混搭配置，
-不会继续复用已关闭或已更换的旧 overlay。
-
-本版本同时收敛主题详情和首页交互：组件来源选择更加清晰，移除持续悬浮的应用提示；首页加入
-轻量的“主题详情”入口，所有自带关闭操作的 Sheet 不再重复显示 grabber。混搭选择继续采用持久化、
-确定性编译、细粒度取消与系统原生 fallback，避免为 Runtime 热路径增加额外解析或可写 I/O。
+当前版本为 `v0.3.1`。两种越狱环境使用不同软件包，请勿混装。
 
 ## 截图
 
@@ -30,13 +21,14 @@ Generation，并由系统原生外观接管。overlay 的启用状态与来源�
 - 导入 ZIP、DEB、TAR 系归档或已展开的目录，在保存前完整审阅识别结果
 - 自动识别深层包装、散落或缺少标准外层目录的受支持资源；导入后保留优秀的生态命名，并实体整理为 MarkTheme 标准主题目录
 - 严格校验主题资产：两遍 ZIP 解码审计、静态 PNG 结构与全像素校验、限额 plist 读取
-- 每次导入生成可恢复的 Library revision，支持崩溃残留恢复与原子切换
+- 同一主题再次导入会原子覆盖 Library 当前快照，不保留版本历史；崩溃残留可在启动时恢复
 - 编译产物以 root-owned 不可变 generation 发布，Runtime 只读访问
 - 主题化 SpringBoard 桌面与通知中心图标、文件夹、角标、Spotlight、设置、电话、照片分享页与系统分享页图标
 - 文件夹背景模块需要基础背景，浅色背景是可选覆盖；图标 overlay 可独立覆盖文件夹
 - 支持作者自定义遮罩、底图与图标叠加层，或复用系统原生圆角遮罩；遮罩先于 overlay 合成
 - 支持跨主题混搭：以当前主题为底稿，可分别从其他已导入主题选取 App 图标、动态日历/时钟、
   设置与分享图标、文件夹、遮罩、overlay、角标、状态栏、图标阴影和拨号盘
+- App 图标支持再添加第二、第三套有序 fallback；底稿未覆盖的 Bundle ID 才会依次由后续主题补齐
 - 每项受支持功能可独立开启或关闭；关闭的能力不会写入 Generation，并由对应系统原生外观接管
 - 普通表面只替换图像内容；返回桌面动画仅在已验证的系统 crossfade 容器内临时加入方形
   代理层，动画结束即移除，不改变系统 view 层级、App 快照几何或动画时间线
@@ -97,7 +89,7 @@ Library 数据。
 - 产品包只含管理器 App、一个短生命周期的 root Helper 和一个 Runtime，无 daemon、无 IPC
   热路径、无轮询。
 - 除返回桌面动画和文件夹 overlay 外，适配器只替换图像内容；文件夹 overlay 使用一个透明、
-  不响应交互的图像 view，固定置于文件夹背景和原生小图标之上。
+  不响应交互的图像 view，固定置于文件夹背景和原生小图标之上，原生文件夹角标保持在 overlay 之上。
 - 返回桌面动画使用一个 transition-scoped 方形代理 layer 隔离会被非等比 morph 拉伸的主题源图；
   它只在当前图标确实包含 MarkTheme 像素且 crossfade ABI 全部通过时启用，跟随原生 source
   fade，并在系统 `cleanup` 前恢复源 layer、移除代理。该适配不 Hook morph fraction，也不增加
@@ -143,7 +135,7 @@ make package-all
 | `app/` | UIKit 管理器 App 与本地化资源 |
 | `core/` | 跨层共享的基础类型与工具 |
 | `ingestion/`、`importers/` | 归档校验、ZIP 解码审计与主题元数据解析 |
-| `compiler/`、`library/` | Generation 编译与 Library revision 管理 |
+| `compiler/`、`library/` | Generation 编译与 Library 当前主题快照管理 |
 | `workflow/` | 导入流程状态机与协调 |
 | `store/`、`helper/` | Runtime Store 与受限 root helper |
 | `runtime/`、`modules/` | 注入映像、进程适配器与主题资源模块 |
@@ -159,6 +151,8 @@ make package-all
 
 ## 致谢
 
+- [Lessica](https://github.com/Lessica)：特别感谢其为 MarkTheme 底层重构提出的神来之笔般的关键建议，
+  为项目后续演进奠定了更可靠的基础
 - [SnowBoard](https://sparkdev.me/)：主题资产格式与 IconBundles 生态的事实标准，
   MarkTheme 的资产兼容性以其为基础
 - [RootHide](https://github.com/roothide/Developer)：RootHide 架构与兼容基础

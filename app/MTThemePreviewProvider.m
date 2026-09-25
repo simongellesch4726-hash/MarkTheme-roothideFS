@@ -2,8 +2,7 @@
 
 #import <ImageIO/ImageIO.h>
 #import <dlfcn.h>
-
-#include <math.h>
+#import <objc/runtime.h>
 
 #import "MTResourceKey.h"
 #import "MTImportSession.h"
@@ -11,18 +10,6 @@
 #import "MTThemeLibraryCatalog.h"
 #import "MTThemeLibraryStore.h"
 #import "MTThemeManifest.h"
-
-@interface NSObject (MTSystemPreviewIconServicesPrivate)
-- (nullable instancetype)initWithApplicationBundleIdentifier:
-    (NSString *)bundleIdentifier;
-- (nullable instancetype)initWithSize:(CGSize)size scale:(CGFloat)scale;
-- (nullable id)imageForImageDescriptor:(id)descriptor;
-@end
-
-@protocol MTSystemPreviewRenderedImage <NSObject>
-- (nullable CGImageRef)CGImage;
-- (CGFloat)scale;
-@end
 
 static NSArray<NSString *> *MTThemePreviewBundleIdentifiers(void) {
     static NSArray<NSString *> *bundleIdentifiers;
@@ -43,6 +30,82 @@ static NSArray<NSString *> *MTThemePreviewBundleIdentifiers(void) {
         ];
     });
     return bundleIdentifiers;
+}
+
+static NSArray<NSString *> *MTSystemPreviewApplicationBundlePaths(
+    NSString *bundleIdentifier) {
+    static NSDictionary<NSString *, NSArray<NSString *> *> *paths;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        paths = @{
+            @"com.apple.mobilephone" : @[
+                @"/Applications/MobilePhone.app",
+                @"/System/Applications/MobilePhone.app",
+            ],
+            @"com.apple.MobileSMS" : @[
+                @"/Applications/MobileSMS.app",
+                @"/System/Applications/MobileSMS.app",
+            ],
+            @"com.apple.mobilesafari" : @[
+                @"/Applications/MobileSafari.app",
+                @"/System/Applications/MobileSafari.app",
+            ],
+            @"com.apple.mobilemail" : @[
+                @"/Applications/MobileMail.app",
+                @"/System/Applications/MobileMail.app",
+            ],
+        };
+    });
+    NSMutableOrderedSet<NSString *> *resolvedPaths =
+        [NSMutableOrderedSet orderedSet];
+
+    // Removable Apple Apps such as Mail are installed in a UUID container on
+    // iOS 17. LaunchServices is used only to resolve that registered bundle
+    // location; icon pixels still come directly from the resolved App's own
+    // Info.plist and Assets.car, never from IconServices or its themed cache.
+    static dispatch_once_t launchServicesOnceToken;
+    dispatch_once(&launchServicesOnceToken, ^{
+        if (NSClassFromString(@"LSApplicationProxy") != Nil) return;
+        NSArray<NSString *> *frameworkPaths = @[
+            @"/System/Library/Frameworks/MobileCoreServices.framework/MobileCoreServices",
+            @"/System/Library/Frameworks/CoreServices.framework/CoreServices",
+        ];
+        for (NSString *frameworkPath in frameworkPaths) {
+            if (dlopen(frameworkPath.fileSystemRepresentation,
+                       RTLD_LAZY | RTLD_LOCAL) != NULL &&
+                NSClassFromString(@"LSApplicationProxy") != Nil) {
+                break;
+            }
+        }
+    });
+    Class proxyClass = NSClassFromString(@"LSApplicationProxy");
+    SEL proxySelector = sel_registerName("applicationProxyForIdentifier:");
+    Method proxyMethod = proxyClass == Nil ? NULL :
+        class_getClassMethod(proxyClass, proxySelector);
+    if (proxyMethod != NULL) {
+        typedef id (*MTApplicationProxyFunction)(id, SEL, id);
+        MTApplicationProxyFunction applicationProxy =
+            (MTApplicationProxyFunction)method_getImplementation(proxyMethod);
+        id proxy = applicationProxy == NULL ? nil :
+            applicationProxy(proxyClass, proxySelector, bundleIdentifier);
+        SEL bundleURLSelector = sel_registerName("bundleURL");
+        Method bundleURLMethod = proxy == nil ? NULL :
+            class_getInstanceMethod(object_getClass(proxy), bundleURLSelector);
+        if (bundleURLMethod != NULL) {
+            typedef id (*MTObjectGetterFunction)(id, SEL);
+            MTObjectGetterFunction bundleURLGetter =
+                (MTObjectGetterFunction)
+                    method_getImplementation(bundleURLMethod);
+            id value = bundleURLGetter == NULL ? nil :
+                bundleURLGetter(proxy, bundleURLSelector);
+            NSURL *bundleURL = [value isKindOfClass:NSURL.class] ? value : nil;
+            if (bundleURL.isFileURL && bundleURL.path.length > 0) {
+                [resolvedPaths addObject:bundleURL.path];
+            }
+        }
+    }
+    [resolvedPaths addObjectsFromArray:paths[bundleIdentifier] ?: @[]];
+    return resolvedPaths.array;
 }
 
 static UIImage *MTSystemPreviewFallbackImage(NSString *bundleIdentifier) {
@@ -95,75 +158,88 @@ static UIImage *MTSystemPreviewFallbackImage(NSString *bundleIdentifier) {
     }];
 }
 
-static UIImage *_Nullable MTSystemPreviewIconServicesImage(
-    NSString *bundleIdentifier) {
-    static dispatch_once_t onceToken;
-    static BOOL iconServicesAvailable;
-    dispatch_once(&onceToken, ^{
-        void *handle = dlopen(
-            "/System/Library/PrivateFrameworks/"
-            "IconServices.framework/IconServices",
-            RTLD_LAZY | RTLD_LOCAL);
-        iconServicesAvailable = handle != NULL;
-        // IconServices stays loaded for the App lifetime. Closing this handle
-        // could invalidate the private class implementations cached below by
-        // the Objective-C runtime.
-    });
-    if (!iconServicesAvailable) return nil;
-
-    Class factoryClass = NSClassFromString(@"ISIconFactory");
-    Class descriptorClass = NSClassFromString(@"ISImageDescriptor");
-    SEL factoryInitializer =
-        @selector(initWithApplicationBundleIdentifier:);
-    SEL descriptorInitializer = @selector(initWithSize:scale:);
-    SEL imageSelector = @selector(imageForImageDescriptor:);
-    if (factoryClass == Nil || descriptorClass == Nil ||
-        ![factoryClass instancesRespondToSelector:factoryInitializer] ||
-        ![descriptorClass instancesRespondToSelector:descriptorInitializer]) {
-        return nil;
+static void MTSystemPreviewAppendIconNames(
+    NSMutableOrderedSet<NSString *> *names,
+    NSDictionary<NSString *, id> *iconDictionary) {
+    if (![iconDictionary isKindOfClass:NSDictionary.class]) return;
+    NSDictionary<NSString *, id> *primary =
+        [iconDictionary[@"CFBundlePrimaryIcon"]
+            isKindOfClass:NSDictionary.class]
+            ? iconDictionary[@"CFBundlePrimaryIcon"] : nil;
+    NSString *iconName = [primary[@"CFBundleIconName"]
+        isKindOfClass:NSString.class] ? primary[@"CFBundleIconName"] : nil;
+    if (iconName.length > 0) [names addObject:iconName];
+    NSArray<NSString *> *files = [primary[@"CFBundleIconFiles"]
+        isKindOfClass:NSArray.class] ? primary[@"CFBundleIconFiles"] : nil;
+    for (id value in files.reverseObjectEnumerator) {
+        if ([value isKindOfClass:NSString.class] &&
+            [(NSString *)value length] > 0) {
+            [names addObject:value];
+        }
     }
-
-    id factory = [factoryClass alloc];
-    id icon = [factory initWithApplicationBundleIdentifier:bundleIdentifier];
-    if (icon == nil || ![icon respondsToSelector:imageSelector]) return nil;
-    CGFloat screenScale = UIScreen.mainScreen.scale;
-    id descriptor = [[descriptorClass alloc]
-        initWithSize:CGSizeMake(60.0, 60.0)
-                 scale:screenScale];
-    id<MTSystemPreviewRenderedImage> renderedImage =
-        [icon imageForImageDescriptor:descriptor];
-    if (renderedImage == nil ||
-        ![renderedImage respondsToSelector:@selector(CGImage)] ||
-        ![renderedImage respondsToSelector:@selector(scale)]) {
-        return nil;
-    }
-    CGImageRef image = [renderedImage CGImage];
-    CGFloat scale = [renderedImage scale];
-    if (image == NULL) return nil;
-    if (!isfinite(scale) || scale <= 0) scale = screenScale;
-    return [UIImage imageWithCGImage:image
-                               scale:scale
-                         orientation:UIImageOrientationUp];
 }
 
-static BOOL MTSystemPreviewImagesHaveEqualPixels(UIImage *left,
-                                                   UIImage *right) {
-    CGImageRef leftImage = left.CGImage;
-    CGImageRef rightImage = right.CGImage;
-    if (leftImage == NULL || rightImage == NULL ||
-        CGImageGetWidth(leftImage) != CGImageGetWidth(rightImage) ||
-        CGImageGetHeight(leftImage) != CGImageGetHeight(rightImage)) {
-        return NO;
+static BOOL MTSystemPreviewBundleImageIsUsable(UIImage *image) {
+    return image != nil && image.size.width > 0.0 &&
+        image.size.height > 0.0 &&
+        (image.CGImage != NULL || image.CIImage != nil);
+}
+
+static UIImage *_Nullable MTSystemPreviewBundleImage(
+    NSString *bundleIdentifier) {
+    for (NSString *bundlePath in
+            MTSystemPreviewApplicationBundlePaths(bundleIdentifier)) {
+        NSBundle *bundle = [NSBundle bundleWithPath:bundlePath];
+        NSDictionary<NSString *, id> *info = bundle.infoDictionary;
+        if (bundle == nil ||
+            ![info[@"CFBundleIdentifier"] isEqual:bundleIdentifier]) {
+            continue;
+        }
+        NSMutableOrderedSet<NSString *> *names =
+            [NSMutableOrderedSet orderedSet];
+        MTSystemPreviewAppendIconNames(names, info[@"CFBundleIcons"]);
+        MTSystemPreviewAppendIconNames(names, info[@"CFBundleIcons~iphone"]);
+        NSString *rootIconName = [info[@"CFBundleIconName"]
+            isKindOfClass:NSString.class] ? info[@"CFBundleIconName"] : nil;
+        if (rootIconName.length > 0) [names addObject:rootIconName];
+        NSArray<NSString *> *rootFiles = [info[@"CFBundleIconFiles"]
+            isKindOfClass:NSArray.class] ? info[@"CFBundleIconFiles"] : nil;
+        for (id value in rootFiles.reverseObjectEnumerator) {
+            if ([value isKindOfClass:NSString.class] &&
+                [(NSString *)value length] > 0) {
+                [names addObject:value];
+            }
+        }
+        [names addObject:@"AppIcon60x60"];
+        [names addObject:@"AppIcon"];
+
+        for (NSString *name in names) {
+            // UIImage resolves this name inside the system App's own
+            // Assets.car. It does not ask IconServices to generate the
+            // currently selected application appearance.
+            UIImage *image = [UIImage imageNamed:name
+                                        inBundle:bundle
+                   compatibleWithTraitCollection:nil];
+            if (MTSystemPreviewBundleImageIsUsable(image)) {
+                return [image imageWithRenderingMode:
+                    UIImageRenderingModeAlwaysOriginal];
+            }
+            NSString *baseName = name.stringByDeletingPathExtension;
+            for (NSString *suffix in @[@"@3x", @"@2x", @""]) {
+                NSString *resource = [baseName
+                    stringByAppendingString:suffix];
+                NSString *path = [bundle pathForResource:resource
+                                                  ofType:@"png"];
+                image = path.length == 0 ? nil :
+                    [UIImage imageWithContentsOfFile:path];
+                if (MTSystemPreviewBundleImageIsUsable(image)) {
+                    return [image imageWithRenderingMode:
+                        UIImageRenderingModeAlwaysOriginal];
+                }
+            }
+        }
     }
-    CFDataRef leftData = CGDataProviderCopyData(
-        CGImageGetDataProvider(leftImage));
-    CFDataRef rightData = CGDataProviderCopyData(
-        CGImageGetDataProvider(rightImage));
-    BOOL equal = leftData != NULL && rightData != NULL &&
-        CFEqual(leftData, rightData);
-    if (leftData != NULL) CFRelease(leftData);
-    if (rightData != NULL) CFRelease(rightData);
-    return equal;
+    return nil;
 }
 
 NSArray<UIImage *> *MTSystemDefaultPreviewImages(void) {
@@ -174,16 +250,8 @@ NSArray<UIImage *> *MTSystemDefaultPreviewImages(void) {
             [MTThemePreviewBundleIdentifiers() subarrayWithRange:NSMakeRange(0, 4)];
         NSMutableArray<UIImage *> *loaded =
             [NSMutableArray arrayWithCapacity:bundleIdentifiers.count];
-        UIImage *missingApplicationImage =
-            MTSystemPreviewIconServicesImage(
-                @"com.hmmzzz.marktheme.missing-system-icon");
         for (NSString *bundleIdentifier in bundleIdentifiers) {
-            UIImage *image =
-                MTSystemPreviewIconServicesImage(bundleIdentifier);
-            if (MTSystemPreviewImagesHaveEqualPixels(
-                    image, missingApplicationImage)) {
-                image = nil;
-            }
+            UIImage *image = MTSystemPreviewBundleImage(bundleIdentifier);
             [loaded addObject:image ?:
                 MTSystemPreviewFallbackImage(bundleIdentifier)];
         }

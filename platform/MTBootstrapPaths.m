@@ -221,7 +221,9 @@ static BOOL MTLogicalBootstrapPathIsValid(NSString *path) {
 #endif
 }
 
-@endNSString *const MTManagerDataRootLiteralPath =
+@end
+
+NSString *const MTManagerDataRootLiteralPath =
     @"/var/mobile/Library/Application Support/MarkTheme";
 NSString *const MTRuntimeHelperLogicalPath =
     @"/usr/libexec/marktheme-helper";

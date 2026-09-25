@@ -12,10 +12,9 @@ FOUNDATION_EXPORT NSString *const MTRuntimeStoreLogicalPath;
 FOUNDATION_EXPORT NSString *const MTGenerationStoreLogicalPath;
 FOUNDATION_EXPORT NSString *const MTRuntimeStateLogicalPath;
 FOUNDATION_EXPORT NSString *const MTGenerationInboxLogicalPath;
-// Manager-owned user data is on the real mobile volume for every jailbreak
-// scheme. It must never be passed through jbroot(), which prefixes paths
-// unconditionally.
-FOUNDATION_EXPORT NSString *const MTManagerDataRootLiteralPath;
+// Manager-owned data follows the same RootHide namespace as the rest of
+// MarkTheme's persistent jailbreak state. Resolve it at point of use.
+FOUNDATION_EXPORT NSString *const MTManagerDataRootLogicalPath;
 FOUNDATION_EXPORT NSString *const MTRuntimeHelperLogicalPath;
 FOUNDATION_EXPORT NSString *const MTDiagnosticsLogicalPath;
 FOUNDATION_EXPORT NSString *const MTDesktopReloadExecutableLogicalPath;

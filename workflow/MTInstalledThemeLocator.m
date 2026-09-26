@@ -69,6 +69,89 @@ static NSString *_Nullable MTInstalledThemePackageName(
     return trimmed.length > 0 ? trimmed : nil;
 }
 
+static NSURL *_Nullable MTInstalledThemeSuiteURL(
+    NSArray<MTInstalledTheme *> *components) {
+    if (components.count < 2) return nil;
+
+    NSString *base = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:@"MarkTheme-InstalledSuites"];
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:base
+                                     withIntermediateDirectories:YES
+                                                      attributes:nil
+                                                           error:NULL]) {
+        return nil;
+    }
+    NSString *suitePath = [base
+        stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:suitePath
+                                     withIntermediateDirectories:YES
+                                                      attributes:nil
+                                                           error:NULL]) {
+        return nil;
+    }
+
+    NSFileManager *manager = NSFileManager.defaultManager;
+    for (MTInstalledTheme *component in components) {
+        NSString *sourceRoot = component.directoryURL.path;
+        NSString *name = component.directoryURL.lastPathComponent;
+        NSString *destinationRoot = [suitePath stringByAppendingPathComponent:name];
+        if (![manager createDirectoryAtPath:destinationRoot
+                 withIntermediateDirectories:YES
+                                  attributes:nil
+                                       error:NULL]) {
+            [manager removeItemAtPath:suitePath error:NULL];
+            return nil;
+        }
+
+        NSDirectoryEnumerator *enumerator =
+            [manager enumeratorAtURL:component.directoryURL
+                includingPropertiesForKeys:nil
+                                 options:0
+                            errorHandler:^BOOL(__unused NSURL *url,
+                                               __unused NSError *error) {
+            return YES;
+        }];
+        for (NSURL *url in enumerator) {
+            NSString *relative = [url.path substringFromIndex:
+                sourceRoot.length];
+            while ([relative hasPrefix:@"/"]) {
+                relative = [relative substringFromIndex:1];
+            }
+            if (relative.length == 0) continue;
+
+            NSString *destination =
+                [destinationRoot stringByAppendingPathComponent:relative];
+            BOOL isDirectory = NO;
+            if (![manager fileExistsAtPath:url.path isDirectory:&isDirectory]) {
+                continue;
+            }
+            if (isDirectory) {
+                if (![manager createDirectoryAtPath:destination
+                         withIntermediateDirectories:YES
+                                          attributes:nil
+                                               error:NULL]) {
+                    [manager removeItemAtPath:suitePath error:NULL];
+                    return nil;
+                }
+                continue;
+            }
+
+            struct stat status = {0};
+            if (lstat(url.path.fileSystemRepresentation, &status) != 0 ||
+                !S_ISREG(status.st_mode)) {
+                [manager removeItemAtPath:suitePath error:NULL];
+                return nil;
+            }
+            if (link(url.path.fileSystemRepresentation,
+                     destination.fileSystemRepresentation) != 0) {
+                [manager removeItemAtPath:suitePath error:NULL];
+                return nil;
+            }
+        }
+    }
+    return [NSURL fileURLWithPath:suitePath isDirectory:YES];
+}
+
 static NSUInteger MTInstalledThemeDirectoryFileCount(NSString *directoryPath) {
     NSDirectoryEnumerator *enumerator =
         [NSFileManager.defaultManager enumeratorAtURL:
@@ -178,9 +261,7 @@ static NSString *_Nullable MTInstalledThemeIdentity(NSString *path) {
     // package-level identity when present, so expose the suite once.
     // Keep the largest component as the import anchor; the directory import
     // pipeline gathers its matching sibling components.
-    NSMutableDictionary<NSString *, MTInstalledTheme *> *grouped =
-        [NSMutableDictionary dictionary];
-    NSMutableDictionary<NSString *, NSNumber *> *scores =
+    NSMutableDictionary<NSString *, NSMutableArray<MTInstalledTheme *> *> *groups =
         [NSMutableDictionary dictionary];
     for (MTInstalledTheme *candidate in candidates) {
         NSString *groupKey = MTInstalledThemePackageName(
@@ -188,16 +269,37 @@ static NSString *_Nullable MTInstalledThemeIdentity(NSString *path) {
         if (groupKey.length == 0) {
             groupKey = [@"path:" stringByAppendingString:candidate.directoryURL.path];
         }
-        NSUInteger score = MTInstalledThemeDirectoryFileCount(
-            candidate.directoryURL.path);
-        MTInstalledTheme *existing = grouped[groupKey];
-        if (existing == nil || score > scores[groupKey].unsignedIntegerValue) {
-            grouped[groupKey] = candidate;
-            scores[groupKey] = @(score);
+        [groups[groupKey] addObject:candidate];
+        if (groups[groupKey] == nil) {
+            groups[groupKey] = [NSMutableArray arrayWithObject:candidate];
         }
     }
 
-    return [grouped.allValues sortedArrayUsingComparator:
+    NSMutableArray<MTInstalledTheme *> *result = [NSMutableArray array];
+    for (NSString *groupKey in groups) {
+        NSArray<MTInstalledTheme *> *components = groups[groupKey];
+        MTInstalledTheme *anchor = components.firstObject;
+        NSUInteger bestScore = 0;
+        for (MTInstalledTheme *candidate in components) {
+            NSUInteger score = MTInstalledThemeDirectoryFileCount(
+                candidate.directoryURL.path);
+            if (anchor == nil || score > bestScore) {
+                anchor = candidate;
+                bestScore = score;
+            }
+        }
+
+        NSURL *suiteURL = MTInstalledThemeSuiteURL(components);
+        NSURL *directoryURL = suiteURL ?: anchor.directoryURL;
+        NSString *displayName = MTInstalledThemePackageName(
+            anchor.directoryURL.path) ?: anchor.displayName;
+        [result addObject:[[MTInstalledTheme alloc]
+            initWithDisplayName:displayName
+                   directoryURL:directoryURL
+                 searchRootPath:anchor.searchRootPath]];
+    }
+
+    return [result sortedArrayUsingComparator:
         ^NSComparisonResult(MTInstalledTheme *left, MTInstalledTheme *right) {
             NSComparisonResult byName = [left.displayName
                 localizedCaseInsensitiveCompare:right.displayName];

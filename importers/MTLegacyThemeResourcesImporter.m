@@ -150,6 +150,12 @@ static NSString *_Nullable MTLegacyBadgeAppearanceForSubject(
     return subjects[subject];
 }
 
+static BOOL MTLegacyFolderIconSubjectIsSupported(NSString *subject) {
+    NSString *folded = subject.lowercaseString;
+    return [folded hasPrefix:@"foldericonbg"] ||
+        [folded hasPrefix:@"anemfoldericonbg"];
+}
+
 static BOOL MTLegacyFileHasPNGSignature(MTSourceFile *file) {
     static const unsigned char signature[] = {
         0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a
@@ -291,7 +297,7 @@ NSString *_Nullable MTLegacySuggestedRelativePathForLooseFilename(
     if (mapping == nil) return nil;
     NSString *subject = mapping.subject;
     if (MTLegacyBadgeAppearanceForSubject(subject) != nil ||
-        [subject.lowercaseString hasPrefix:@"foldericonbg"]) {
+        MTLegacyFolderIconSubjectIsSupported(subject)) {
         return [@"Bundles/com.apple.springboard/"
             stringByAppendingString:filename];
     }
@@ -389,7 +395,7 @@ NSString *_Nullable MTLegacySuggestedRelativePathForLooseFilename(
         NSString *badgeAppearance = family == MTLegacyResourceFamilyBadge
             ? MTLegacyBadgeAppearanceForSubject(mapping.subject) : nil;
         if (family == MTLegacyResourceFamilyBadge && badgeAppearance == nil) {
-            if ([mapping.subject.lowercaseString hasPrefix:@"foldericonbg"]) {
+            if (MTLegacyFolderIconSubjectIsSupported(mapping.subject)) {
                 family = MTLegacyResourceFamilyFolderIcon;
             } else {
                 continue;

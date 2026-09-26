@@ -216,8 +216,13 @@ static NSString *MTStaticIconCacheKey(
             configurationForBundleIdentifier:bundleIdentifier
                                    generation:generation
                                         error:&calendarError];
-    MTCalendarIconContent *calendarContent = calendarConfiguration == nil
-        ? nil : calendarContentOverride;
+    if (calendarContentOverride != nil && calendarConfiguration == nil) {
+        atomic_fetch_add_explicit(
+            &MTRuntimeStaticIconSnapshotObservation.snapshotMisses,
+            1, memory_order_relaxed);
+        return nil;
+    }
+    MTCalendarIconContent *calendarContent = calendarContentOverride;
     if (calendarError != nil) {
         atomic_fetch_add_explicit(
             &MTRuntimeStaticIconSnapshotObservation.snapshotMisses,

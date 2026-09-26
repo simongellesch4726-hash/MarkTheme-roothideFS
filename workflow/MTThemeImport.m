@@ -1,7 +1,5 @@
 #import "MTThemeImport.h"
 
-#import "MTAuditedSource.h"
-
 #import "MTAssetStagingSession.h"
 #import "MTAssetStagingSessionInternal.h"
 #import "MTBadgeConfiguration.h"
@@ -120,136 +118,6 @@ static BOOL MTThemeImportSetError(NSError **error,
 static BOOL MTThemeImportIsCancelled(
     MTImportCancellationToken *_Nullable token) {
     return token != nil && token.isCancelled;
-}
-
-static NSString *_Nullable MTThemeImportPackageNameFromPlistData(NSData *data) {
-    if (data.length == 0 || data.length > 64 * 1024) return nil;
-    id plist = [NSPropertyListSerialization propertyListWithData:data
-                                                         options:NSPropertyListImmutable
-                                                          format:NULL
-                                                           error:NULL];
-    if (![plist isKindOfClass:NSDictionary.class]) return nil;
-    NSString *packageName = plist[@"PackageName"];
-    if (![packageName isKindOfClass:NSString.class]) return nil;
-    NSString *trimmed = [packageName stringByTrimmingCharactersInSet:
-        NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return trimmed.length > 0 ? trimmed : nil;
-}
-
-static NSString *_Nullable MTThemeImportPackageNameForThemeDirectory(
-    id<MTAuditedSource> source,
-    NSString *themeDirectory,
-    MTImportCancellationToken *cancellationToken) {
-    NSString *infoPath = [themeDirectory stringByAppendingString:@"/Info.plist"];
-    NSData *data = [source readFileDataAtRelativePath:infoPath
-                                      maximumByteCount:64 * 1024
-                                     cancellationToken:cancellationToken
-                                                 error:NULL];
-    return MTThemeImportPackageNameFromPlistData(data);
-}
-
-@interface MTFilteredAuditedSource : NSObject <MTAuditedSource>
-@property(nonatomic, strong) id<MTAuditedSource> baseSource;
-@property(nonatomic, strong) MTSourceInventory *inventory;
-- (instancetype)initWithBaseSource:(id<MTAuditedSource>)baseSource
-                          inventory:(MTSourceInventory *)inventory;
-@end
-
-@implementation MTFilteredAuditedSource
-
-- (instancetype)initWithBaseSource:(id<MTAuditedSource>)baseSource
-                          inventory:(MTSourceInventory *)inventory {
-    self = [super init];
-    if (self == nil) return nil;
-    _baseSource = baseSource;
-    _inventory = inventory;
-    return self;
-}
-
-- (NSData *)readFileDataAtRelativePath:(NSString *)relativePath
-                       maximumByteCount:(uint64_t)maximumByteCount
-                      cancellationToken:(MTImportCancellationToken *)cancellationToken
-                                  error:(NSError **)error {
-    return [self.baseSource readFileDataAtRelativePath:relativePath
-                                       maximumByteCount:maximumByteCount
-                                      cancellationToken:cancellationToken
-                                                  error:error];
-}
-
-- (BOOL)streamFileAtRelativePath:(NSString *)relativePath
-                 maximumByteCount:(uint64_t)maximumByteCount
-                 cancellationToken:(MTImportCancellationToken *)cancellationToken
-                      byteConsumer:(MTAuditedSourceByteConsumer)byteConsumer
-                             error:(NSError **)error {
-    return [self.baseSource streamFileAtRelativePath:relativePath
-                                    maximumByteCount:maximumByteCount
-                                   cancellationToken:cancellationToken
-                                        byteConsumer:byteConsumer
-                                               error:error];
-}
-
-@end
-
-static id<MTAuditedSource> _Nullable MTThemeImportSourceBySelectingThemeSuite(
-    id<MTAuditedSource> source,
-    NSString *selectedThemeDirectory,
-    MTImportCancellationToken *cancellationToken,
-    NSError **error) {
-    if (source == nil || selectedThemeDirectory.length == 0) return source;
-
-    NSString *selectedPackageName =
-        MTThemeImportPackageNameForThemeDirectory(
-            source, selectedThemeDirectory, cancellationToken);
-    if (selectedPackageName.length == 0) return source;
-
-    NSMutableSet<NSString *> *includedThemeDirectories =
-        [NSMutableSet setWithObject:selectedThemeDirectory];
-    NSMutableSet<NSString *> *candidateDirectories = [NSMutableSet set];
-
-    for (MTSourceFile *file in source.inventory.files) {
-        NSArray<NSString *> *components =
-            [file.relativePath componentsSeparatedByString:@"/"];
-        if (components.count < 2) continue;
-        NSString *directory = components.firstObject;
-        if (![directory.lowercaseString hasSuffix:@".theme"] ||
-            directory.length <= 6) {
-            continue;
-        }
-        [candidateDirectories addObject:directory];
-    }
-
-    for (NSString *directory in candidateDirectories) {
-        if ([directory isEqualToString:selectedThemeDirectory]) continue;
-        NSString *packageName =
-            MTThemeImportPackageNameForThemeDirectory(
-                source, directory, cancellationToken);
-        if ([packageName isEqualToString:selectedPackageName]) {
-            [includedThemeDirectories addObject:directory];
-        }
-    }
-
-    if (includedThemeDirectories.count <= 1) return source;
-
-    NSMutableArray<MTSourceFile *> *filteredFiles = [NSMutableArray array];
-    for (MTSourceFile *file in source.inventory.files) {
-        NSArray<NSString *> *components =
-            [file.relativePath componentsSeparatedByString:@"/"];
-        if (components.count < 2) continue;
-        if ([includedThemeDirectories containsObject:components.firstObject]) {
-            [filteredFiles addObject:file];
-        }
-    }
-
-    NSError *inventoryError = nil;
-    MTSourceInventory *filteredInventory =
-        [MTSourceInventory inventoryWithFiles:filteredFiles
-                                        error:&inventoryError];
-    if (filteredInventory == nil) {
-        if (error != NULL) *error = inventoryError;
-        return nil;
-    }
-    return [[MTFilteredAuditedSource alloc]
-        initWithBaseSource:source inventory:filteredInventory];
 }
 
 static NSString *_Nullable MTMarkThemePathFromAnchor(NSString *path,
@@ -1032,18 +900,6 @@ static NSString *MTThemeImportDescriptionForCancellation(
     }
 
     MTThemeImportReport(progressHandler, MTThemeImportStageAcquiring, 0, 1);
-    // Installed SnowBoard/Anemone themes can be a suite of sibling
-    // .theme directories sharing one PackageName. Snapshot the containing
-    // Themes directory so all matching components are available to the
-    // existing MTThemeSourceRoot merger; archive/folder imports keep their
-    // original single-root behavior.
-    NSURL *snapshotURL = directoryURL;
-    NSString *selectedThemeDirectory = nil;
-    if ([directoryURL.pathExtension.lowercaseString isEqualToString:@"theme"]) {
-        selectedThemeDirectory = directoryURL.lastPathComponent;
-        snapshotURL = [directoryURL URLByDeletingLastPathComponent];
-    }
-
     MTDirectorySnapshotConfiguration *snapshotConfiguration =
         [[MTDirectorySnapshotConfiguration alloc]
             initWithSessionsRootURL:
@@ -1056,7 +912,7 @@ static NSString *MTThemeImportDescriptionForCancellation(
     NSError *operationError = nil;
     MTDirectorySnapshotSession *snapshot =
         [MTDirectorySnapshotSession
-            sessionBySnapshottingDirectoryAtURL:snapshotURL
+            sessionBySnapshottingDirectoryAtURL:directoryURL
             configuration:snapshotConfiguration
             cancellationToken:cancellationToken
             auditor:^id<MTAuditedSource>(NSURL *candidateURL,
@@ -1080,21 +936,7 @@ static NSString *MTThemeImportDescriptionForCancellation(
     MTThemeImportReport(progressHandler, MTThemeImportStageAuditing, 0, 1);
     MTThemeImportReport(progressHandler, MTThemeImportStageAuditing, 1, 1);
 
-    id<MTAuditedSource> selectedSource =
-        MTThemeImportSourceBySelectingThemeSuite(
-            snapshot.auditedSource,
-            selectedThemeDirectory,
-            cancellationToken,
-            &operationError);
-    if (selectedSource == nil) {
-        [snapshot discard:NULL];
-        MTThemeImportSetError(error, MTThemeImportErrorDirectorySnapshot,
-            @"The selected theme suite could not be resolved safely.",
-            operationError);
-        return nil;
-    }
-
-    return [self prepareAuditedThemeSource:selectedSource
+    return [self prepareAuditedThemeSource:snapshot.auditedSource
         sourceName:sourceName
         sourceDiscarder:^BOOL(NSError **cleanupError) {
             return [snapshot discard:cleanupError];

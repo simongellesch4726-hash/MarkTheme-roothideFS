@@ -1,105 +1,125 @@
 # MarkTheme
 
-简体中文 | [English](README.en.md)
+English
 
-MarkTheme 是面向现代 iOS 越狱环境的模块化主题引擎与管理器，支持 conventional rootless 与
-RootHide。它在兼容主流主题资产（SnowBoard / IconBundles 风格的 `.theme` 包）的前提下，把
-主题的解析与编译全部放在无注入的管理器 App 内完成，注入进程中只运行一个尽可能小的 Runtime，
-并始终以「回到系统原生外观」作为失败时的正确结果。
+MarkTheme is a modular theme engine and manager for modern jailbroken iOS environments, with support
+for both conventional rootless jailbreaks and RootHide. It is compatible with mainstream theme assets,
+including SnowBoard- and IconBundles-style `.theme` packages. Theme parsing and compilation happen
+entirely inside the non-injected Manager app, while injected processes run only a deliberately small
+Runtime. When anything fails validation, returning to the native system appearance is always the correct
+outcome.
 
-当前版本为 `v0.3.1`。两种越狱环境使用不同软件包，请勿混装。
+The current version is `v0.3.1`. The two jailbreak environments use different packages and the packages
+must not be mixed.
 
-## 截图
+## Screenshots
 
 <p align="center">
-  <img src="screenshots/home.png" width="45%" alt="MarkTheme 主题库首页">
-  <img src="screenshots/theme-detail.png" width="45%" alt="MarkTheme 主题详情与组件选择">
+  <img src="screenshots/home.png" width="45%" alt="MarkTheme theme library home screen">
+  <img src="screenshots/theme-detail.png" width="45%" alt="MarkTheme theme details and component selection">
 </p>
 
-## 功能
+## Features
 
-- 导入 ZIP、DEB、TAR 系归档或已展开的目录，在保存前完整审阅识别结果
-- 自动识别深层包装、散落或缺少标准外层目录的受支持资源；导入后保留优秀的生态命名，并实体整理为 MarkTheme 标准主题目录
-- 严格校验主题资产：两遍 ZIP 解码审计、静态 PNG 结构与全像素校验、限额 plist 读取
-- 同一主题再次导入会原子覆盖 Library 当前快照，不保留版本历史；崩溃残留可在启动时恢复
-- 编译产物以 root-owned 不可变 generation 发布，Runtime 只读访问
-- 主题化 SpringBoard 桌面与通知中心图标、文件夹、角标、Spotlight、设置、电话、照片分享页与系统分享页图标
-- 文件夹背景模块需要基础背景，浅色背景是可选覆盖；图标 overlay 可独立覆盖文件夹
-- 支持作者自定义遮罩、底图与图标叠加层，或复用系统原生圆角遮罩；遮罩先于 overlay 合成
-- 支持跨主题混搭：以当前主题为底稿，可分别从其他已导入主题选取 App 图标、动态日历/时钟、
-  设置与分享图标、文件夹、遮罩、overlay、角标、状态栏、图标阴影和拨号盘
-- App 图标支持再添加第二、第三套有序 fallback；底稿未覆盖的 Bundle ID 才会依次由后续主题补齐
-- 每项受支持功能可独立开启或关闭；关闭的能力不会写入 Generation，并由对应系统原生外观接管
-- 普通表面只替换图像内容；返回桌面动画仅在已验证的系统 crossfade 容器内临时加入方形
-  代理层，动画结束即移除，不改变系统 view 层级、App 快照几何或动画时间线
-- 支持简体中文与英文
+- Import ZIP, DEB, TAR-family archives, or expanded directories and review every recognized asset before saving
+- Recognize supported resources in deep, scattered, or wrapper-less layouts, retain useful ecosystem names, and materialize them into the MarkTheme standard theme layout
+- Strict asset validation, including two-pass ZIP decoding audits, structural and full-pixel PNG validation,
+  and bounded plist parsing
+- Reimporting the same theme atomically replaces its current Library snapshot; no version history is retained, and crash residue is recovered at startup
+- Publication of compiled output as immutable, root-owned generations that the Runtime can only read
+- Theming for SpringBoard Home Screen and Notification Center icons, folders, badges, Spotlight, Settings,
+  Phone, the Photos share sheet, and system share-sheet icons
+- The folder-background module requires a base background and accepts an optional light variant; icon
+  overlays can cover folders independently
+- Author-provided masks, underlays, and icon overlays, or the native system corner mask; masks are composed
+  before overlays
+- Cross-theme mixing: keep one theme as the base while sourcing App icons, dynamic Calendar/Clock,
+  Settings and Share icons, folders, masks, overlays, badges, status bar art, icon shadows, and dialer
+  controls from other imported themes
+- App icons can add ordered second and third fallback sets; later themes fill only Bundle IDs left
+  uncovered by every earlier source
+- Every supported feature can be enabled or disabled independently; disabled features are omitted from
+  the Generation and fall back to the native system appearance
+- Image-content replacement on ordinary surfaces; the return-to-Home path adds a temporary square proxy
+  only inside a verified system crossfade container, removes it when the animation ends, and leaves the
+  system view hierarchy, app-snapshot geometry, and animation timeline unchanged
+- Simplified Chinese and English localization
 
-混搭来源、功能开关、缺失资源与应用回退的完整行为见
-[主题混搭与功能开关](docs/THEME_MIXING.md)。
+See [Theme Mixing and Feature Switches](docs/THEME_MIXING.en.md) for the complete behavior of source
+selection, missing resources, feature switches, application, and fallback.
 
-## 兼容性
+## Compatibility
 
-导入适配、资源分类置信度、MarkTheme 标准目录和新增 module 的测试要求见
-[导入适配与资源目录扩展指南](docs/IMPORT_ADAPTER_GUIDE.md)。
+See the [import adapter and resource-layout extension guide](docs/IMPORT_ADAPTER_GUIDE.md)
+for classification confidence, the MarkTheme directory contract, and the checklist for new modules.
 
-| Package scheme | 适用环境 | `.deb` Architecture |
+| Package scheme | Environment | `.deb` architecture |
 | --- | --- | --- |
-| `rootless` | conventional rootless（如 Dopamine） | `iphoneos-arm64` |
-| `roothide` | RootHide（如 Relaxin） | `iphoneos-arm64e` |
+| `rootless` | Conventional rootless jailbreaks such as Dopamine | `iphoneos-arm64` |
+| `roothide` | RootHide jailbreaks such as Relaxin | `iphoneos-arm64e` |
 
-- 安装下限为 iOS 17.0，当前主动维护的系统范围为 iOS 17.x 至 18.x；iOS 16 暂不支持，
-  包管理器会拒绝安装。更高版本不作兼容承诺，会按实时 ABI 校验结果保留系统原生外观。
-- App、Helper 与 Runtime 均包含 `arm64` 与 `arm64e` slices。
-- 不支持 rootful，也不支持在两种 package scheme 之间混装。
-- 软件包依赖 `uikittools` 与 `ellekit (>= 1.2)`。
+- Installation requires iOS 17.0 or later. The actively maintained range is iOS 17.x through 18.x.
+  iOS 16 is temporarily unsupported and package managers will reject installation. Later versions are
+  not promised compatibility and fall back to the native appearance according to live ABI checks.
+- The app, Helper, and Runtime each include both `arm64` and `arm64e` slices.
+- Rootful environments are unsupported, and packages from the two schemes must not be mixed.
+- Packages depend on `uikittools` and `ellekit (>= 1.2)`.
 
-Runtime 当前适配的系统进程：SpringBoard、Spotlight、Preferences、Photos、MobilePhone、
-SharingUIService 与 sharingd；普通 App 仅在加载系统 ShareSheet 框架后懒注入分享适配器。
-支持范围内的分享图标入口按实际宿主覆盖，ShareSheet Activity、SharingUI provider 与
-UIKit App icon 生产入口可独立、延迟安装。
-每个进程先按 `bundle id + 可执行文件名` 匹配对应模块，再由适配器
-在运行时逐项校验目标类、实现镜像路径、selector、方法签名，以及必要时的 ivar 类型与偏移；
-校验通过才安装 Hook。
+The Runtime currently adapts SpringBoard, Spotlight, Preferences, Photos, MobilePhone,
+SharingUIService, and sharingd. Ordinary apps receive the share adapter lazily and only after loading the
+system ShareSheet framework. Sharing icon paths in the supported range are covered according to their
+actual host processes; ShareSheet Activity, SharingUI provider, and UIKit app-icon producer entry points
+can be installed independently and after framework loading.
 
-> 适配层不使用系统 build 或 Mach-O UUID 白名单推断兼容性。任何一项实时 ABI 校验不通过时，
-> 对应表面保持系统原生外观，不会猜测调用私有接口。少数依赖对象布局的表面（如角标背景）
-> 额外钉定 ivar 偏移，因此在布局变化的系统版本上会静默回退到原生外观而不是崩溃。
-> 当前 ABI 维护基线包含 iOS 17.0 / 17.2.1 用户诊断、iOS 17.3.1 / RootHide 实机，
-> 以及 iOS 18 图标投递路径回归；
-> 其他系统小版本与 conventional rootless 组合仍需实机验证。
+Each process is first matched to a module using its `bundle ID + executable name`. The adapter then
+validates every target class, implementation image path, selector, method signature, and—where required—
+ivar type and offset before installing a hook.
 
-## 安装与安全
+> The adaptation layer never infers compatibility from a system-build or Mach-O UUID allowlist. If any
+> live ABI check fails, that surface remains native instead of guessing how to call a private API. A small
+> number of object-layout-dependent surfaces, such as badge backgrounds, additionally pin ivar offsets;
+> they silently fall back rather than crash when the layout changes. Current ABI maintenance baselines
+> include iOS 17.0 and 17.2.1 user diagnostics, an iOS 17.3.1 RootHide device, and iOS 18 icon-delivery
+> regression coverage. Other iOS point releases and conventional rootless
+> combinations still require device validation.
 
-从 Releases 下载与当前越狱环境匹配的软件包，用你惯用的包管理器安装，或：
+## Installation and Safety
+
+Download the package matching your jailbreak environment from Releases and install it with your preferred
+package manager, or use:
 
 ```bash
 dpkg -i com.hmmzzz.marktheme_<version>_<arch>.deb
 ```
 
-安装后在桌面打开 MarkTheme，导入主题包并应用。切换主题后需要一次 Respring 才能让新的
-Runtime 映像生效；App 会在应用完成后提示。
+After installation, open MarkTheme from the Home Screen, import a theme package, and apply it. Switching
+themes requires one Respring so that every target process loads the new Runtime image; the app prompts you
+after applying.
 
-主题资产不完整或与系统不兼容可能影响桌面显示。安装和切换前，请确认能够进入当前越狱的
-safe mode 并通过软件包管理器移除 MarkTheme。不要手动修改 MarkTheme 的 Runtime Store 或
-Library 数据。
+Incomplete or incompatible assets can affect Home Screen rendering. Before installing or switching themes,
+make sure you can enter your jailbreak's safe mode and remove MarkTheme through a package manager. Do not
+manually modify MarkTheme's Runtime Store or Library data.
 
-## 实现边界
+## Implementation Boundaries
 
-- 注入进程中只允许运行 Runtime；主题解析、编译与可写 IO 全部在管理器 App 侧完成。
-- 产品包只含管理器 App、一个短生命周期的 root Helper 和一个 Runtime，无 daemon、无 IPC
-  热路径、无轮询。
-- 除返回桌面动画和文件夹 overlay 外，适配器只替换图像内容；文件夹 overlay 使用一个透明、
-  不响应交互的图像 view，固定置于文件夹背景和原生小图标之上，原生文件夹角标保持在 overlay 之上。
-- 返回桌面动画使用一个 transition-scoped 方形代理 layer 隔离会被非等比 morph 拉伸的主题源图；
-  它只在当前图标确实包含 MarkTheme 像素且 crossfade ABI 全部通过时启用，跟随原生 source
-  fade，并在系统 `cleanup` 前恢复源 layer、移除代理。该适配不 Hook morph fraction，也不增加
-  `layoutSubviews` 热路径工作。
-- 任何身份、ABI、尺寸或资源校验失败都返回系统原始结果，绝不猜测。
+- Injected processes run only the Runtime; theme parsing, compilation, and writable I/O stay in the Manager app.
+- The package contains the Manager app, one short-lived root Helper, and one Runtime. It has no daemon,
+  IPC hot path, or polling loop.
+- Outside the return-to-Home animation and folder overlays, adapters replace image content. A folder
+  overlay uses one transparent, non-interactive image view above the folder background and native miniatures,
+  while the native folder badge remains above the overlay.
+- The return-to-Home animation uses one transition-scoped square proxy layer to isolate themed source pixels
+  from the non-uniform morph. It activates only when the icon actually contains current MarkTheme pixels and
+  the complete crossfade ABI has passed validation. It follows the native source fade, restores the source
+  layer, and removes itself before the system's `cleanup` completes. The adaptation does not hook the morph
+  fraction and adds no `layoutSubviews` hot-path work.
+- Any identity, ABI, size, or resource validation failure returns the original system result. Private APIs
+  are never called based on a guess.
 
-## 构建
+## Building
 
-需要 macOS/Xcode、[RootHide Theos](https://github.com/roothide/theos)、兼容的 iOS SDK、
-`ldid` 与 `rg`。
+Building requires macOS/Xcode, [RootHide Theos](https://github.com/roothide/theos), a compatible iOS SDK,
+`ldid`, and `rg`.
 
 ```bash
 git clone https://github.com/Hmmzzz/MarkTheme.git
@@ -108,70 +128,74 @@ export THEOS=/path/to/roothide-theos
 
 make package-roothide
 make package-rootless
-# 或依次构建两种软件包
+# Or build both packages in sequence
 make package-all
 ```
 
-生成的 `.deb` 位于 `packages/`；上述目标会自动调用 `scripts/verify-package` 检查 scheme
-布局、Mach-O slices、最低系统版本、linking、entitlements、文件权限与 Runtime 进程白名单。
-也可以单独审计已有软件包：
+Generated `.deb` files are placed in `packages/`. These targets automatically run `scripts/verify-package`
+to audit scheme layout, Mach-O slices, minimum OS version, linking, entitlements, permissions, and the
+Runtime process allowlist. You can also audit an existing package directly:
 
 ```bash
 ./scripts/verify-package packages/<marktheme.deb>
 ```
 
-## 测试
+## Testing
 
 ```bash
 ./tests/run
 ```
 
-测试只在宿主机编译和运行，不会连接设备、部署软件包、应用主题、Respring 或 reboot。
+The test suite compiles and runs only on the host. It does not connect to a device, deploy packages, apply
+themes, Respring, or reboot.
 
-## 目录结构
+## Repository Layout
 
-| 路径 | 内容 |
+| Path | Contents |
 | --- | --- |
-| `app/` | UIKit 管理器 App 与本地化资源 |
-| `core/` | 跨层共享的基础类型与工具 |
-| `ingestion/`、`importers/` | 归档校验、ZIP 解码审计与主题元数据解析 |
-| `compiler/`、`library/` | Generation 编译与 Library 当前主题快照管理 |
-| `workflow/` | 导入流程状态机与协调 |
-| `store/`、`helper/` | Runtime Store 与受限 root helper |
-| `runtime/`、`modules/` | 注入映像、进程适配器与主题资源模块 |
-| `platform/` | 越狱环境路径解析（rootless / RootHide） |
+| `app/` | UIKit Manager app and localized resources |
+| `core/` | Shared foundational types and utilities |
+| `ingestion/`, `importers/` | Archive validation, ZIP decoding audits, and theme metadata parsing |
+| `compiler/`, `library/` | Generation compilation and current Library snapshot management |
+| `workflow/` | Import workflow state machine and coordination |
+| `store/`, `helper/` | Runtime Store and constrained root helper |
+| `runtime/`, `modules/` | Injected image, process adapters, and theme resource modules |
+| `platform/` | Jailbreak path resolution for rootless and RootHide |
 | `layout/` | Debian package lifecycle |
-| `scripts/`、`tests/` | 双包构建审计与宿主回归 |
+| `scripts/`, `tests/` | Dual-package build audits and host regression tests |
 
-## 参与贡献
+## Contributing
 
-欢迎提交 issue 和 pull request。功能改动请运行宿主回归；涉及路径、权限、package lifecycle
-或 scheme 的改动还应分别构建并审计 rootless 与 RootHide 软件包。请勿提交 `.theos/`、
-`packages/`、`.deb`、设备数据、密钥或其他本机产物。
+Issues and pull requests are welcome. Run the host regression suite for functional changes. Changes involving
+paths, permissions, package lifecycle, or schemes should also build and audit both rootless and RootHide
+packages. Do not commit `.theos/`, `packages/`, `.deb` files, device data, keys, or other machine-local
+artifacts.
 
-## 致谢
+## Acknowledgements
 
-- [Lessica](https://github.com/Lessica)：特别感谢其为 MarkTheme 底层重构提出的神来之笔般的关键建议，
-  为项目后续演进奠定了更可靠的基础
-- [SnowBoard](https://sparkdev.me/)：主题资产格式与 IconBundles 生态的事实标准，
-  MarkTheme 的资产兼容性以其为基础
-- [RootHide](https://github.com/roothide/Developer)：RootHide 架构与兼容基础
-- [Theos](https://theos.dev/)：iOS 越狱开发与打包工具链
-- [ElleKit](https://github.com/evelyneee/ellekit)：Runtime 使用的方法替换实现
+- [Lessica](https://github.com/Lessica) for the inspired, pivotal suggestion behind MarkTheme's
+  foundational refactor and the more reliable direction it established for the project
+- [SnowBoard](https://sparkdev.me/) for establishing the de facto theme-asset and IconBundles ecosystem
+  that informs MarkTheme's compatibility
+- [RootHide](https://github.com/roothide/Developer) for the RootHide architecture and compatibility foundation
+- [Theos](https://theos.dev/) for the iOS jailbreak development and packaging toolchain
+- [ElleKit](https://github.com/evelyneee/ellekit) for the Runtime method-replacement implementation
 
-第三方许可见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for third-party license notices.
 
-## 主题许可与免责声明
+## Theme Licensing and Disclaimer
 
-MarkTheme 不提供、销售、授权、审核或分发任何第三方主题或图标资产。用户应自行确认拥有导入、
-使用、复制或分发相关资产所需的权利；本项目的 GPL 许可不授予任何第三方资产权利。
+MarkTheme does not provide, sell, license, review, or distribute any third-party themes or icon assets. Users
+are responsible for confirming that they have the rights required to import, use, copy, or distribute those
+assets. This project's GPL license grants no rights to third-party assets.
 
-本软件按“现状”提供，不作任何担保。项目维护者与贡献者不对未经授权使用主题资产，或兼容性、
-不当操作造成的设备异常、数据丢失和系统不稳定负责；完整条款见 GPLv3 第 15、16 条。
+This software is provided “as is,” without warranty. Maintainers and contributors are not liable for
+unauthorized use of theme assets or for device issues, data loss, or system instability caused by
+incompatibility or improper operation. See Sections 15 and 16 of GPLv3 for the complete terms.
 
-本项目与 Apple Inc. 无关，亦不隶属于任何主题作者或既有主题引擎。
+This project is not affiliated with Apple Inc., any theme author, or any existing theme engine.
 
-## 许可证
+## License
 
 Copyright (C) 2026 Hmmzzz.
 

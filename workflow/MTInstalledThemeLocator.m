@@ -52,6 +52,41 @@ static NSArray<NSString *> *MTInstalledThemeLiteralRoots(void) {
 
 @end
 
+static NSString *_Nullable MTInstalledThemePackageName(
+    NSString *directoryPath) {
+    NSString *infoPath = [directoryPath stringByAppendingPathComponent:@"Info.plist"];
+    NSData *data = [NSData dataWithContentsOfFile:infoPath options:NSDataReadingMappedIfSafe error:NULL];
+    if (data.length == 0 || data.length > 64 * 1024) return nil;
+    id plist = [NSPropertyListSerialization propertyListWithData:data
+                                                         options:NSPropertyListImmutable
+                                                          format:NULL
+                                                           error:NULL];
+    if (![plist isKindOfClass:NSDictionary.class]) return nil;
+    NSString *packageName = plist[@"PackageName"];
+    if (![packageName isKindOfClass:NSString.class]) return nil;
+    NSString *trimmed = [packageName stringByTrimmingCharactersInSet:
+        NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return trimmed.length > 0 ? trimmed : nil;
+}
+
+static NSUInteger MTInstalledThemeDirectoryFileCount(NSString *directoryPath) {
+    NSDirectoryEnumerator *enumerator =
+        [NSFileManager.defaultManager enumeratorAtURL:
+            [NSURL fileURLWithPath:directoryPath isDirectory:YES]
+            includingPropertiesForKeys:@[NSURLIsRegularFileKey]
+            options:0
+            errorHandler:^BOOL(__unused NSURL *url, __unused NSError *error) {
+        return YES;
+    }];
+    NSUInteger count = 0;
+    for (NSURL *url in enumerator) {
+        NSNumber *isRegular = nil;
+        [url getResourceValue:&isRegular forKey:NSURLIsRegularFileKey error:NULL];
+        if (isRegular.boolValue) count++;
+    }
+    return count;
+}
+
 @implementation MTInstalledThemeLocator
 
 - (instancetype)init {
@@ -105,7 +140,7 @@ static NSString *_Nullable MTInstalledThemeIdentity(NSString *path) {
 
 - (NSArray<MTInstalledTheme *> *)locateInstalledThemes {
     NSFileManager *manager = NSFileManager.defaultManager;
-    NSMutableArray<MTInstalledTheme *> *themes = [NSMutableArray array];
+    NSMutableArray<MTInstalledTheme *> *candidates = [NSMutableArray array];
     NSMutableSet<NSString *> *seenPaths = [NSMutableSet set];
     NSMutableSet<NSString *> *seenRoots = [NSMutableSet set];
     for (NSString *rootPath in self.searchRootPaths) {
@@ -127,14 +162,42 @@ static NSString *_Nullable MTInstalledThemeIdentity(NSString *path) {
             NSString *identity = MTInstalledThemeIdentity(path) ?: path;
             if ([seenPaths containsObject:identity]) continue;
             [seenPaths addObject:identity];
-            [themes addObject:[[MTInstalledTheme alloc]
-                initWithDisplayName:[name substringToIndex:name.length - 6]
+
+            NSString *packageName = MTInstalledThemePackageName(path);
+            NSString *displayName = packageName ?: [name substringToIndex:name.length - 6];
+            [candidates addObject:[[MTInstalledTheme alloc]
+                initWithDisplayName:displayName
                        directoryURL:[NSURL fileURLWithPath:path
                                                isDirectory:YES]
                      searchRootPath:rootPath]];
         }
     }
-    return [themes sortedArrayUsingComparator:
+
+    // A SnowBoard/Anemone package can install several sibling .theme
+    // directories that form one logical theme. PackageName is the explicit
+    // package-level identity when present, so expose the suite once.
+    // Keep the largest component as the import anchor; the directory import
+    // pipeline gathers its matching sibling components.
+    NSMutableDictionary<NSString *, MTInstalledTheme *> *grouped =
+        [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSNumber *> *scores =
+        [NSMutableDictionary dictionary];
+    for (MTInstalledTheme *candidate in candidates) {
+        NSString *groupKey = MTInstalledThemePackageName(
+            candidate.directoryURL.path);
+        if (groupKey.length == 0) {
+            groupKey = [@"path:" stringByAppendingString:candidate.directoryURL.path];
+        }
+        NSUInteger score = MTInstalledThemeDirectoryFileCount(
+            candidate.directoryURL.path);
+        MTInstalledTheme *existing = grouped[groupKey];
+        if (existing == nil || score > scores[groupKey].unsignedIntegerValue) {
+            grouped[groupKey] = candidate;
+            scores[groupKey] = @(score);
+        }
+    }
+
+    return [grouped.allValues sortedArrayUsingComparator:
         ^NSComparisonResult(MTInstalledTheme *left, MTInstalledTheme *right) {
             NSComparisonResult byName = [left.displayName
                 localizedCaseInsensitiveCompare:right.displayName];

@@ -296,22 +296,54 @@ static NSArray<MTThemeResource *> *MTIconBundlesResolveResourceConflicts(
         }];
 }
 
-static NSDictionary<NSString *, NSString *> *MTClockResourceVariantsByPath(void) {
-    static NSDictionary<NSString *, NSString *> *paths;
+static NSArray<NSDictionary<NSString *, id> *> *
+MTClockResourceFilenameRules(void) {
+    static NSArray<NSDictionary<NSString *, id> *> *rules;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        paths = @{
-            @"Bundles/com.apple.springboard/ClockIconBackgroundSquare.png" :
-                @"background",
-            @"Bundles/com.apple.springboard/ClockIconHourHand.png" :
-                @"hour-hand",
-            @"Bundles/com.apple.springboard/ClockIconMinuteHand.png" :
-                @"minute-hand",
-            @"Bundles/com.apple.springboard/ClockIconSecondHand.png" :
-                @"second-hand",
-        };
+        rules = @[
+            @{ @"suffix" : @"~iphone@3x", @"rank" : @0, @"trait" : @"iphone", @"scale" : @3 },
+            @{ @"suffix" : @"@3x~iphone", @"rank" : @1, @"trait" : @"iphone", @"scale" : @3 },
+            @{ @"suffix" : @"~iphone@2x", @"rank" : @2, @"trait" : @"iphone", @"scale" : @2 },
+            @{ @"suffix" : @"@2x~iphone", @"rank" : @3, @"trait" : @"iphone", @"scale" : @2 },
+            @{ @"suffix" : @"~ipad@3x", @"rank" : @4, @"trait" : @"ipad", @"scale" : @3 },
+            @{ @"suffix" : @"@3x~ipad", @"rank" : @5, @"trait" : @"ipad", @"scale" : @3 },
+            @{ @"suffix" : @"~ipad@2x", @"rank" : @6, @"trait" : @"ipad", @"scale" : @2 },
+            @{ @"suffix" : @"@2x~ipad", @"rank" : @7, @"trait" : @"ipad", @"scale" : @2 },
+            @{ @"suffix" : @"@3x", @"rank" : @10, @"trait" : @"any", @"scale" : @3 },
+            @{ @"suffix" : @"@2x", @"rank" : @11, @"trait" : @"any", @"scale" : @2 },
+            @{ @"suffix" : @"~iphone", @"rank" : @20, @"trait" : @"iphone", @"scale" : @0 },
+            @{ @"suffix" : @"~ipad", @"rank" : @21, @"trait" : @"ipad", @"scale" : @0 },
+            @{ @"suffix" : @"", @"rank" : @30, @"trait" : @"any", @"scale" : @0 },
+        ];
     });
-    return paths;
+    return rules;
+}
+
+static NSString *_Nullable MTClockResourceVariantForPath(
+    NSString *path, NSUInteger *matchRank) {
+    NSString *filename = path.lastPathComponent;
+    if (![filename.lowercaseString hasSuffix:@".png"]) return nil;
+    NSString *stem = [filename substringToIndex:filename.length - 4];
+    NSDictionary<NSString *, NSString *> *bases = @{
+        @"ClockIconBackgroundSquare" : @"background",
+        @"ClockIconHourHand" : @"hour-hand",
+        @"ClockIconMinuteHand" : @"minute-hand",
+        @"ClockIconSecondHand" : @"second-hand",
+    };
+    for (NSString *base in bases) {
+        if (![stem hasPrefix:base]) continue;
+        NSString *suffix = [stem substringFromIndex:base.length];
+        for (NSDictionary<NSString *, id> *rule in MTClockResourceFilenameRules()) {
+            if ([suffix isEqualToString:rule[@"suffix"]]) {
+                if (matchRank != NULL) {
+                    *matchRank = [rule[@"rank"] unsignedIntegerValue];
+                }
+                return bases[base];
+            }
+        }
+    }
+    return nil;
 }
 
 static NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *
@@ -679,12 +711,13 @@ NSString *_Nullable MTIconBundlesSuggestedRelativePathForLooseFilename(
 
     NSUInteger clockResourceCount = 0;
     MTThemeResource *clockBackgroundResource = nil;
-    NSDictionary<NSString *, NSString *> *clockVariants =
-        MTClockResourceVariantsByPath();
     for (MTSourceFile *file in inventory.files) {
         MTThemeComponentPath *component = [MTThemeComponentPath
             pathWithLogicalRelativePath:file.relativePath];
-        NSString *variant = clockVariants[component.relativePath];
+        NSUInteger matchRank = 0;
+        NSString *variant = component == nil
+            ? nil
+            : MTClockResourceVariantForPath(component.relativePath, &matchRank);
         if (variant == nil) continue;
         if (!MTIconBundlesFileHasPNGSignature(file)) {
             rejected++;
@@ -709,7 +742,7 @@ NSString *_Nullable MTIconBundlesSuggestedRelativePathForLooseFilename(
                relativeAssetPath:file.relativePath
                    contentSHA256:file.contentSHA256
                     sourceFormat:@"snowboard.clock-component"
-                       matchRank:0
+                       matchRank:matchRank
                            error:&keyError];
         if (resource == nil) {
             rejected++;

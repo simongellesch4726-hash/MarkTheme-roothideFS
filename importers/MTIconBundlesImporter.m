@@ -402,8 +402,17 @@ NSString *_Nullable MTIconBundlesSuggestedRelativePathForLooseFilename(
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         NSMutableSet<NSString *> *values = [NSMutableSet set];
-        for (NSString *path in MTClockResourceVariantsByPath()) {
-            [values addObject:path.lastPathComponent.lowercaseString];
+        NSArray<NSString *> *bases = @[
+            @"ClockIconBackgroundSquare",
+            @"ClockIconHourHand",
+            @"ClockIconMinuteHand",
+            @"ClockIconSecondHand",
+        ];
+        for (NSString *base in bases) {
+            for (NSDictionary<NSString *, id> *rule in MTClockResourceFilenameRules()) {
+                NSString *filename = [base stringByAppendingString:rule[@"suffix"]];
+                [values addObject:[filename lowercaseString]];
+            }
         }
         clockFilenames = [values copy];
     });

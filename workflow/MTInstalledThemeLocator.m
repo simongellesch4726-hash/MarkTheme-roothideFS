@@ -1,6 +1,7 @@
 #import "MTInstalledThemeLocator.h"
 
 #import <sys/stat.h>
+#import <unistd.h>
 
 #import "MTBootstrapPaths.h"
 
@@ -269,10 +270,12 @@ static NSString *_Nullable MTInstalledThemeIdentity(NSString *path) {
         if (groupKey.length == 0) {
             groupKey = [@"path:" stringByAppendingString:candidate.directoryURL.path];
         }
-        [groups[groupKey] addObject:candidate];
-        if (groups[groupKey] == nil) {
-            groups[groupKey] = [NSMutableArray arrayWithObject:candidate];
+        NSMutableArray<MTInstalledTheme *> *group = groups[groupKey];
+        if (group == nil) {
+            group = [NSMutableArray array];
+            groups[groupKey] = group;
         }
+        [group addObject:candidate];
     }
 
     NSMutableArray<MTInstalledTheme *> *result = [NSMutableArray array];
